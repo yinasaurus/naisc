@@ -33,21 +33,23 @@ ENV/
 *.swo
 *~
 
-# Data
+# Data (exclude all CSVs except prediction.csv)
 data/raw/
 data/processed/
-*.csv
 *.parquet
 *.pkl
 *.h5
 *.hdf5
+# Exclude CSV files but allow prediction.csv
+*.csv
+!prediction.csv
 
-# Models
+# Models (exclude all joblib except model.joblib)
 models/
 *.pkl
-*.joblib
 *.h5
 *.pb
+# Note: model.joblib should be committed
 
 # Logs
 logs/

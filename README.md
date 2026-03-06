@@ -1,343 +1,363 @@
 # 🛡️ Adaptive Drift Intelligence Challenge
 
+**Team Name:** [YOUR_TEAM_NAME_HERE]
+
 **Guarding Model Integrity in a Shifting Data World**
 
-A comprehensive solution for detecting, visualizing, and mitigating data drift in machine learning models. This system automatically identifies distribution shifts between training and test datasets, provides intuitive visualizations, and implements adaptive mitigation strategies to maintain model performance.
+---
 
-## 📋 Table of Contents
+## 📖 What This Project Does
 
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Framework & Tools](#framework--tools)
-- [Solution Workflow](#solution-workflow)
-- [Model Architecture](#model-architecture)
-- [Performance Metrics](#performance-metrics)
-- [Approach Justification](#approach-justification)
-- [Limitations](#limitations)
-- [Project Structure](#project-structure)
-- [Contributing](#contributing)
+This is a comprehensive solution for the **NAISC Singtel 2026 Challenge** that automatically detects, visualizes, and mitigates data drift in machine learning models. When your training data and test data have different distributions (data drift), this system:
 
-## 🎯 Overview
+1. **Detects Drift**: Automatically identifies which features have changed between training and test data
+2. **Quantifies Severity**: Classifies drift as low, medium, or high severity
+3. **Mitigates Drift**: Applies appropriate strategies to handle the detected drift
+4. **Trains Model**: Trains a LightGBM model with fixed hyperparameters (as per challenge requirements)
+5. **Generates Outputs**: Creates prediction.csv and model.joblib files
 
-Data drift is a critical challenge in production ML systems where the distribution of incoming data differs from the training data. This solution provides:
+### Key Features
 
-- **Automatic Drift Detection**: Identifies feature types and applies appropriate statistical tests
-- **Comprehensive Visualizations**: Clear, interactive charts showing drift extent and nature
-- **Adaptive Mitigation**: Multiple strategies to handle detected drift
-- **Interactive Dashboard**: User-friendly interface for end-to-end workflow
+- ✅ **Automatic Feature Type Detection**: Automatically identifies numeric, categorical, and binary features
+- ✅ **Multiple Statistical Tests**: Uses KS test, Mann-Whitney U, Chi-square, PSI, and Wasserstein distance
+- ✅ **Adaptive Mitigation**: Applies robust scaling, domain adaptation, and feature reweighting
+- ✅ **Challenge Compliant**: Uses LightGBM v4.6.0 with fixed hyperparameters
+- ✅ **End-to-End Pipeline**: Runs completely automated without manual intervention
 
-## ✨ Features
+---
 
-### 1. Automatic Feature Type Detection
-- Automatically classifies features as numeric, categorical, or binary
-- Applies appropriate statistical tests based on feature type
+## 🚀 Quick Start Guide
 
-### 2. Multi-Test Drift Detection
-- **Numeric Features**: Kolmogorov-Smirnov test, Mann-Whitney U test, PSI, Wasserstein distance
-- **Categorical Features**: Chi-square test, PSI
-- Configurable significance levels and thresholds
+### For Your Team - Getting Started
 
-### 3. Comprehensive Visualizations
-- Distribution comparisons (histograms, bar charts)
-- Statistical test results visualization
-- Feature-level statistics comparison
-- Overall drift summary dashboard
+#### Step 1: Install Dependencies
 
-### 4. Mitigation Strategies
-- **Feature Reweighting**: Adjust feature importance based on drift severity
-- **Data Augmentation**: Augment training data with test-like samples
-- **Robust Scaling**: Apply robust scaling to reduce drift impact
-- **Domain Adaptation**: Map training distribution to test distribution
-- **Adaptive Training**: Train models with drift-aware techniques
-
-### 5. Interactive Dashboard
-- Streamlit-based web interface
-- Step-by-step workflow guidance
-- Real-time visualization updates
-- Export capabilities
-
-## 🏗️ Architecture
-
-### System Components
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Streamlit Dashboard                    │
-│                      (app.py)                            │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-┌───────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
-│   Drift      │ │ Visualization│ │ Mitigation  │
-│  Detector    │ │   Module     │ │   Module    │
-└───────┬──────┘ └──────────────┘ └──────┬──────┘
-        │                                 │
-┌───────▼─────────────────────────────────▼──────┐
-│         Statistical Tests Module               │
-│  (KS, Mann-Whitney, Chi-square, PSI, etc.)    │
-└────────────────────────────────────────────────┘
-```
-
-### Data Flow
-
-1. **Data Input**: Training and test datasets
-2. **Feature Analysis**: Automatic type detection
-3. **Drift Detection**: Statistical tests execution
-4. **Visualization**: Interactive charts generation
-5. **Mitigation**: Strategy application
-6. **Adaptive Training**: Model training with drift awareness
-
-## 🚀 Installation
-
-### Prerequisites
-
-- Python 3.8+
-- pip or conda
-
-### Setup
-
-1. **Clone the repository**
 ```bash
-git clone <repository-url>
-cd naisc
-```
-
-2. **Create virtual environment** (recommended)
-```bash
+# Create a virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
 
-3. **Install dependencies**
-```bash
+# Activate virtual environment
+# On Windows:
+venv\Scripts\activate
+# On Mac/Linux:
+source venv/bin/activate
+
+# Install all required packages
 pip install -r requirements.txt
 ```
 
-4. **Run the application**
-```bash
-streamlit run app.py
-```
-
-The dashboard will open in your browser at `http://localhost:8501`
-
-### Docker Installation
+#### Step 2: Run the Solution
 
 ```bash
-# Build the Docker image
-docker build -t drift-intelligence .
-
-# Run the container
-docker run -p 8501:8501 drift-intelligence
+# Basic usage with public datasets
+python ./src/main.py \
+  --train_data_filepath NAISC-Singtel-2026/public_data/train.csv \
+  --test_data_filepath NAISC-Singtel-2026/public_data/test.csv
 ```
 
-## 📖 Usage
+#### Step 3: Check Outputs
 
-### 1. Data Upload
+After running, you'll get:
+- **Console output**: Drift detection summary, runtime, and AU-PRC metrics
+- **prediction.csv**: Test predictions with CustomerID and probability_score
+- **model.joblib**: Trained LightGBM model
 
-- Upload training and test CSV files
-- Or generate sample data with intentional drift for testing
+---
 
-### 2. Drift Detection
+## 📋 Challenge Requirements
 
-- Configure detection parameters (α, PSI threshold)
-- Select features to analyze
-- Run drift detection
+### ✅ What We Must Do
 
-### 3. Visualizations
+1. **Fixed Hyperparameters**: Use LightGBM v4.6.0 with these exact settings:
+   - `verbosity: -1`
+   - `objective: "binary"`
+   - `is_unbalance: True`
+   - `random_state: 42`
+   - `importance_type: 'gain'`
 
-- View overall drift summary
-- Explore feature-level distributions
-- Analyze statistical test results
+2. **Command-Line Interface**: Solution runs via:
+```bash
+   python ./src/main.py --train_data_filepath <train> --test_data_filepath <test>
+   ```
 
-### 4. Mitigation
+3. **Console Output**: Must print:
+   - Data Drift Detection & Mitigation Summary
+   - Runtime (in seconds)
+   - AU-PRC on training set
+   - AU-PRC on test set after mitigation
 
-- Select mitigation strategy
-- Apply to training data
-- View recommendations
+4. **Output Files**: Must generate:
+   - `prediction.csv` (CustomerID, probability_score)
+   - `model.joblib` (trained model)
 
-### 5. Adaptive Training
+### ✅ What We Can Do
 
-- Configure model parameters
-- Train with drift awareness
-- Evaluate performance
+- Feature engineering
+- Data selection (e.g., sliding windows)
+- Sample weighting
+- Data transformations
+- Drift detection logic
+- Automated retraining strategies
 
-### 6. Results
+### ❌ What We Cannot Do
 
-- Review detection summary
-- Export results as CSV
+- Change model hyperparameters
+- Switch to a different model family
+- Use GPU acceleration
 
-## 🛠️ Framework & Tools
+---
 
-### Core Libraries
+## 🏗️ How It Works (Architecture)
 
-- **NumPy** (1.24.3): Numerical computations
-- **Pandas** (2.0.3): Data manipulation and analysis
-- **Scikit-learn** (1.3.0): Machine learning utilities
-- **SciPy** (1.11.1): Statistical tests and functions
+### System Overview
 
-### Statistical Testing
+```
+┌─────────────────────────────────────────┐
+│         Main Pipeline (main.py)         │
+└─────────────────┬───────────────────────┘
+                  │
+    ┌─────────────┼─────────────┐
+    │             │             │
+┌───▼────┐  ┌─────▼─────┐  ┌───▼──────┐
+│ Drift  │  │Mitigation │  │ Training │
+│Detection│  │ Strategies│  │ (LightGBM)│
+└────────┘  └───────────┘  └──────────┘
+```
 
-- **SciPy.stats**: Kolmogorov-Smirnov, Mann-Whitney U, Chi-square tests
-- **Custom PSI Implementation**: Population Stability Index
-- **Wasserstein Distance**: Earth Mover's Distance
+### Step-by-Step Process
 
-### Visualization
+1. **Data Loading**: Reads training and test CSV files
+2. **Feature Preparation**: 
+   - Identifies CustomerID, ChurnStatus (target), and feature columns
+   - Encodes categorical features automatically
+   - Handles missing values
+3. **Drift Detection**:
+   - Detects feature types (numeric/categorical/binary)
+   - Runs appropriate statistical tests for each feature
+   - Calculates drift severity (low/medium/high)
+4. **Mitigation**:
+   - Applies robust scaling to numeric features
+   - Uses domain adaptation for high-severity drift
+   - Applies feature reweighting based on drift severity
+5. **Model Training**:
+   - Trains LightGBM with fixed hyperparameters
+   - Uses sample weighting based on drift
+6. **Evaluation & Output**:
+   - Calculates AU-PRC metrics
+   - Generates prediction.csv and model.joblib
+   - Prints summary to console
 
-- **Plotly** (5.15.0): Interactive visualizations
-- **Matplotlib** (3.7.2): Static plotting
-- **Seaborn** (0.12.2): Statistical visualizations
+### Statistical Tests Used
 
-### Dashboard
+| Feature Type | Tests Applied |
+|-------------|---------------|
+| **Numeric** | Kolmogorov-Smirnov, Mann-Whitney U, PSI, Wasserstein Distance |
+| **Categorical** | Chi-square, PSI |
+| **Binary** | Chi-square, PSI |
 
-- **Streamlit** (1.25.0): Web application framework
+### Mitigation Strategies
 
-### Machine Learning
+1. **Robust Scaling**: Uses median and IQR instead of mean/std (less sensitive to outliers)
+2. **Domain Adaptation**: Maps training distribution to match test distribution
+3. **Feature Reweighting**: Reduces weight of drifted features during training
 
-- **XGBoost** (1.7.6): Gradient boosting
-- **LightGBM** (4.0.0): Lightweight gradient boosting
-- **Scikit-learn**: Random Forest, preprocessing
+---
 
-### Development Tools
+## 📊 Expected Output Format
 
-- **Python 3.8+**: Programming language
-- **Docker**: Containerization for reproducibility
-- **Git**: Version control
+### Console Output Example
 
-## 🔄 Solution Workflow
+```
+============================================================
+DATA DRIFT DETECTION & MITIGATION
+============================================================
 
-### End-to-End Process
+[1/3] Detecting data drift...
+[2/3] Drift Detection Summary:
+  - Total features analyzed: 35
+  - Features with detected drift: 8
+  - Drift percentage: 22.86%
+  
+  Columns with detected drift:
+    - MonthlyCharge (numeric, severity: high)
+    - TotalCharges (numeric, severity: medium)
+    - InternetType (categorical, severity: low)
+    ...
+    
+[3/3] Applying mitigation strategies...
+  Mitigation methods applied: Domain Adaptation, Robust Scaling, Feature Reweighting
 
-1. **Data Ingestion**
-   - Load training and test datasets
-   - Validate data formats
-   - Handle missing values
+============================================================
+MODEL TRAINING
+============================================================
 
-2. **Feature Analysis**
-   - Automatic feature type detection
-   - Statistical summary generation
-   - Data quality assessment
+Training LightGBM model with fixed hyperparameters...
 
-3. **Drift Detection**
-   - Apply appropriate statistical tests
-   - Calculate drift metrics
-   - Determine drift severity
+============================================================
+MODEL PERFORMANCE METRICS
+============================================================
 
-4. **Visualization**
-   - Generate distribution comparisons
-   - Create statistical test charts
-   - Build summary dashboards
+AU-PRC on training set: 0.823456
+AU-PRC on test set after mitigation: 0.789123
 
-5. **Mitigation Strategy Selection**
-   - Analyze drift patterns
-   - Recommend mitigation approaches
-   - Apply selected strategies
+============================================================
+RUNTIME
+============================================================
 
-6. **Adaptive Training**
-   - Prepare data with mitigation
-   - Train models with drift awareness
-   - Evaluate performance
+Time taken for drift detection and mitigation: 12.34 seconds
+Total runtime: 45.67 seconds
 
-7. **Results & Reporting**
-   - Generate comprehensive reports
-   - Export results
-   - Document findings
+============================================================
+PIPELINE COMPLETED SUCCESSFULLY
+============================================================
+```
 
-## 🧠 Model Architecture
+### Output Files
 
-### Drift Detection Models
+**prediction.csv**:
+```csv
+CustomerID,probability_score
+1610a102a7854c5d,0.234567
+2b3c4d5e6f7g8h9i,0.789012
+...
+```
 
-#### Statistical Tests
+**model.joblib**: Binary file containing the trained LightGBM model
 
-1. **Kolmogorov-Smirnov Test**
-   - Tests equality of continuous distributions
-   - Non-parametric, distribution-free
-   - Suitable for numeric features
+---
 
-2. **Mann-Whitney U Test**
-   - Non-parametric alternative to t-test
-   - Robust to outliers
-   - Tests distribution shifts
+## 🛠️ Project Structure
 
-3. **Chi-Square Test**
-   - Tests independence of categorical variables
-   - Compares frequency distributions
-   - Suitable for categorical features
+```
+.
+├── src/
+│   ├── main.py                    # Main entry point (CHALLENGE REQUIRED)
+│   ├── drift_detector/
+│   │   ├── detector.py           # Main drift detection logic
+│   │   └── statistical_tests.py  # Statistical test implementations
+│   ├── mitigation/
+│   │   ├── strategies.py         # Mitigation strategies
+│   │   └── adaptive_training.py  # Training utilities
+│   └── visualization/
+│       └── plotter.py            # Visualization (optional)
+├── app.py                         # Streamlit dashboard (OPTIONAL)
+├── requirements.txt              # Python dependencies
+├── .gitignore                    # Git ignore rules
+└── README.md                     # This file
+```
 
-4. **Population Stability Index (PSI)**
-   - Measures distribution shift magnitude
-   - Threshold-based detection
-   - Works for both numeric and categorical
+---
 
-5. **Wasserstein Distance**
-   - Earth Mover's Distance
-   - Measures distribution difference
-   - Normalized for interpretability
+## 🔧 Technical Details
 
-### Mitigation Models
+### Dependencies
 
-1. **Feature Reweighting**
-   - Adjusts feature importance
-   - Based on drift severity
-   - Multiple weighting strategies
+- **Python**: 3.8+ (Challenge specifies 3.12, but 3.13 works)
+- **Core**: NumPy, Pandas, Scikit-learn, SciPy
+- **ML**: LightGBM 4.6.0 (exact version required)
+- **Stats**: Statsmodels
+- **Visualization**: Plotly, Matplotlib, Seaborn (optional)
+- **Dashboard**: Streamlit (optional)
 
-2. **Data Augmentation**
-   - Samples from test distribution
-   - Augments training data
-   - Balances distributions
+### Key Components
 
-3. **Robust Scaling**
-   - Uses median and IQR
-   - Less sensitive to outliers
-   - Reduces drift impact
+#### Drift Detection (`src/drift_detector/`)
 
-4. **Domain Adaptation**
-   - Maps training to test distribution
-   - Preserves relationships
-   - Maintains model validity
+- **DriftDetector**: Main class that orchestrates drift detection
+- **StatisticalTests**: Collection of statistical tests (KS, Mann-Whitney, Chi-square, PSI, Wasserstein)
 
-### Adaptive Training Models
+#### Mitigation (`src/mitigation/`)
 
-1. **Random Forest**
-   - Ensemble method
-   - Feature importance weighting
-   - Robust to drift
+- **DriftMitigator**: Implements mitigation strategies
+- **AdaptiveTrainer**: Training utilities (not used in main.py, but available)
 
-2. **XGBoost**
-   - Gradient boosting
-   - Sample weighting support
-   - High performance
+#### Main Pipeline (`src/main.py`)
 
-3. **LightGBM**
-   - Fast gradient boosting
-   - Memory efficient
-   - Handles large datasets
+- Handles command-line arguments
+- Orchestrates entire pipeline
+- Generates required outputs
 
-## 📊 Performance Metrics
+---
 
-### Drift Detection Metrics
+## 🎯 For Your Team - Understanding the Code
 
-- **Detection Accuracy**: Percentage of correctly identified drifted features
-- **False Positive Rate**: Features incorrectly flagged as drifted
-- **False Negative Rate**: Drifted features missed
-- **Severity Classification**: Accuracy of severity assessment
+### Main Entry Point: `src/main.py`
 
-### Model Performance Metrics
+This is the **only file** that will be executed for the challenge. It:
+1. Parses command-line arguments
+2. Loads data
+3. Calls drift detection
+4. Applies mitigation
+5. Trains model
+6. Generates outputs
 
-- **Classification**: Accuracy, Precision, Recall, F1-score
-- **Regression**: RMSE, MAE, R²
-- **Feature Importance**: Contribution to predictions
+### Key Functions to Understand
 
-### System Performance
+- `load_data()`: Reads CSV files
+- `prepare_features()`: Encodes categoricals, prepares features
+- `detect_and_mitigate_drift()`: Main drift detection and mitigation logic
+- `train_model()`: Trains LightGBM with fixed hyperparameters
+- `evaluate_model()`: Calculates AU-PRC metrics
+- `save_outputs()`: Creates prediction.csv and model.joblib
 
-- **Processing Speed**: Time per feature analysis
-- **Scalability**: Performance with large datasets
-- **Memory Usage**: Resource efficiency
+### How to Modify
 
-## 💡 Approach Justification
+If you want to improve the solution:
+
+1. **Better Drift Detection**: Modify `src/drift_detector/statistical_tests.py`
+2. **Better Mitigation**: Modify `src/mitigation/strategies.py`
+3. **Feature Engineering**: Add to `prepare_features()` in `src/main.py`
+4. **Different Strategies**: Modify `detect_and_mitigate_drift()` in `src/main.py`
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: Import errors
+```bash
+# Make sure you're in the virtual environment
+pip install -r requirements.txt
+```
+
+### Issue: File not found
+```bash
+# Check file paths are correct
+python ./src/main.py --train_data_filepath <correct_path> --test_data_filepath <correct_path>
+```
+
+### Issue: LightGBM version mismatch
+```bash
+# Uninstall and reinstall exact version
+pip uninstall lightgbm
+pip install lightgbm==4.6.0
+```
+
+### Issue: Memory errors
+- The solution handles large datasets, but if you encounter issues, consider sampling
+
+---
+
+## 📝 Testing Your Solution
+
+### Test with Public Data
+
+```bash
+# Make sure you have the public datasets
+python ./src/main.py \
+  --train_data_filepath NAISC-Singtel-2026/public_data/train.csv \
+  --test_data_filepath NAISC-Singtel-2026/public_data/test.csv
+```
+
+### Verify Outputs
+
+1. Check console output has all required sections
+2. Verify `prediction.csv` exists and has correct format
+3. Verify `model.joblib` exists
+4. Check AU-PRC values are reasonable
+
+---
+
+## 🎓 Approach Justification
 
 ### Why Multiple Statistical Tests?
 
@@ -349,112 +369,249 @@ Different tests capture different aspects of drift:
 
 Using multiple tests provides comprehensive coverage and reduces false positives/negatives.
 
-### Why Adaptive Mitigation?
+### Why These Mitigation Strategies?
 
-- **Feature Reweighting**: Preserves all data while adjusting importance
-- **Data Augmentation**: Maintains training data integrity while adapting
-- **Robust Scaling**: Reduces impact of outliers and shifts
+- **Robust Scaling**: Less sensitive to outliers than standard scaling
 - **Domain Adaptation**: Directly addresses distribution mismatch
+- **Feature Reweighting**: Preserves all data while adjusting importance
 
-### Why Ensemble Training?
+### Why This Architecture?
 
-- Combines strengths of different algorithms
-- More robust to drift
-- Better generalization
-- Weighted by drift severity
+- **Modular**: Easy to modify individual components
+- **Extensible**: Can add new tests or strategies easily
+- **Maintainable**: Clear separation of concerns
 
-### Comparison to Alternatives
+---
 
-| Approach | Advantages | Disadvantages |
-|----------|-----------|---------------|
-| **Single Test** | Fast, simple | May miss drift types |
-| **Multiple Tests** | Comprehensive | More computation |
-| **Retraining** | Simple | Loses original model |
-| **Adaptive Training** | Preserves knowledge | More complex |
-| **Manual Mitigation** | Full control | Time-consuming |
-| **Automated Mitigation** | Fast, consistent | Less flexibility |
+## ⚠️ Known Limitations
 
-Our approach balances comprehensiveness, automation, and flexibility.
+1. **Large Datasets**: May need optimization for very large datasets (>1M rows)
+2. **High Dimensionality**: Many features may slow analysis
+3. **Complex Patterns**: May miss subtle, non-linear drift
+4. **Time Series**: Not optimized for temporal drift
 
-## ⚠️ Limitations
+---
 
-### Known Limitations
+## 📊 Dataset Information
 
-1. **Large Datasets**
-   - Performance may degrade with very large datasets (>1M rows)
-   - Solution: Implement sampling or batch processing
+### Public Dataset Structure
 
-2. **High-Dimensional Data**
-   - Many features may slow down analysis
-   - Solution: Feature selection or dimensionality reduction
+The challenge provides public train and test datasets. Key information:
 
-3. **Complex Drift Patterns**
-   - May not detect subtle, non-linear drift
-   - Solution: Advanced ML-based drift detection
+**Required Columns**:
+- `CustomerID` (object): Unique identifier - **MUST be preserved for prediction.csv**
+- `ChurnStatus` (object): Target variable (Yes/No) - **converted to 1/0 automatically**
+- `Month` (object): Time indicator - **excluded from features**
 
-4. **Categorical Features**
-   - Limited handling of high-cardinality categories
-   - Solution: Category grouping or embedding
+**Feature Columns** (35+ features):
+- **Demographics**: UserGender, UserAge, Country, State, LocationCity, etc.
+- **Service Features**: VoiceService, InternetType, Contract, Offer, etc.
+- **Usage**: DataUsageAvg, TenureinMonths, NumberofReferrals, etc.
+- **Financial**: MonthlyCharge, TotalCharges, TotalRevenue, CustomerLifetimeValue, etc.
+- **Services**: CyberSecuritySvc, CloudStorageSvc, VideoSvc_A, VideoSvc_B, etc.
 
-5. **Time Series Data**
-   - Not optimized for temporal drift
-   - Solution: Time-aware drift detection
+**Data Types**:
+- Numeric: int64, float64 (automatically detected)
+- Categorical: object (Yes/No, categories) - automatically encoded
 
-6. **Missing Data**
-   - Assumes missing data patterns are consistent
-   - Solution: Missing data pattern analysis
+**Important Notes**:
+- Final evaluation uses a **hidden dataset** with same structure but different distributions
+- The solution must handle any valid CSV with this structure
+- Missing values are handled automatically
 
-### Future Improvements
+---
 
-- Real-time drift monitoring
-- Automated model retraining triggers
-- Advanced ML-based drift detection
-- Time series drift detection
-- Multi-variate drift detection
-- Automated hyperparameter tuning for mitigation
+## 📚 Additional Resources
 
-## 📁 Project Structure
+### Optional Dashboard
 
-```
-naisc/
-├── src/
-│   ├── __init__.py
-│   ├── drift_detector/
-│   │   ├── __init__.py
-│   │   ├── detector.py          # Main drift detection class
-│   │   └── statistical_tests.py # Statistical test implementations
-│   ├── visualization/
-│   │   ├── __init__.py
-│   │   └── plotter.py            # Visualization components
-│   └── mitigation/
-│       ├── __init__.py
-│       ├── strategies.py         # Mitigation strategies
-│       └── adaptive_training.py  # Adaptive training techniques
-├── app.py                        # Streamlit dashboard
-├── requirements.txt              # Python dependencies
-├── Dockerfile                    # Docker configuration
-├── README.md                     # This file
-└── .gitignore                   # Git ignore rules
+The Streamlit dashboard (`app.py`) is available for interactive exploration:
+
+```bash
+streamlit run app.py
 ```
 
-## 🤝 Contributing
+This provides:
+- Interactive data upload
+- Real-time drift visualization
+- Mitigation strategy testing
+- Model performance analysis
 
-This is a challenge submission. For questions or improvements:
+**Note**: This is optional and not required for challenge submission, but can be helpful for understanding drift patterns.
 
-1. Review the code structure
-2. Test with your datasets
-3. Provide feedback on improvements
+---
+
+## ✅ Pre-Submission Checklist
+
+Before submitting, make sure:
+
+- [ ] Team name is added at the top of README.md
+- [ ] Solution runs end-to-end without errors
+- [ ] `prediction.csv` is generated with correct format (CustomerID, probability_score)
+- [ ] `model.joblib` is generated
+- [ ] Console output includes all required sections
+- [ ] Repository structure matches requirements
+- [ ] `requirements.txt` includes all dependencies
+- [ ] `.gitignore` excludes __pycache__ and CSVs (except prediction.csv)
+- [ ] Report.pdf is created and documents your approach
+- [ ] All files are pushed to main branch
+- [ ] Microsoft form is submitted before deadline (12PM, 17 April 2026 SGT)
+- [ ] Collaborators are added to private repo
+
+---
+
+## 🎯 Next Steps for Your Team
+
+1. **Test with Public Data**: Run the solution with provided datasets
+2. **Add Team Name**: Update `[YOUR_TEAM_NAME_HERE]` at the top of this README
+3. **Optimize**: Fine-tune mitigation strategies based on results
+4. **Generate Report**: Create `report.pdf` documenting your approach
+5. **Submit**: Follow challenge submission guidelines above
+
+---
+
+## 📤 Submission Requirements
+
+### Important Dates
+- **Challenge Period**: 6 March 2026 – 12PM, 17 April 2026
+- **Submission Deadline**: 12PM, 17 April 2026 (SGT)
+
+### Submission Steps
+
+1. **Push to Repository**
+   - Push your final solution to your team's private repo main branch
+   - Ensure all required files are included (see structure below)
+
+2. **Submit Form**
+   - **Before the deadline**, submit to: https://forms.office.com/r/gwDZZQkTDG
+   - Form collects: team name, GitHub repo link, final GitHub commit hash
+   - **Note**: Only the latest submission before the deadline will be considered
+
+3. **Add Collaborators**
+   - Add these emails as collaborators to your private repo:
+     - cecilia.lin@singtel.com
+     - yiting.jin@singtel.com
+     - honzheng.low@singtel.com
+
+### Required Repository Structure
+
+Your repo must have this exact structure:
+
+```
+.
+├── src/                    # Solution source code
+│   ├── main.py            # Main function (REQUIRED)
+│   ├── drift_detector/    # Drift detection module
+│   ├── mitigation/         # Mitigation strategies
+│   └── visualization/     # Visualization (optional)
+├── notebooks/              # (Optional) Jupyter notebooks
+│   └── xxx.ipynb
+├── prediction.csv         # REQUIRED: Predictions on public test set
+├── model.joblib           # REQUIRED: Trained model on public train set
+├── report.pdf             # REQUIRED: PDF report of solution
+├── .gitignore             # REQUIRED: Exclude __pycache__ and CSVs
+├── requirements.txt       # REQUIRED: List of dependencies
+└── README.md              # REQUIRED: Main landing page with Team Name
+```
+
+### Required Files Checklist
+
+- ✅ `src/main.py` - Main entry point
+- ✅ `prediction.csv` - Test predictions (CustomerID, probability_score)
+- ✅ `model.joblib` - Trained model
+- ✅ `report.pdf` - Solution documentation
+- ✅ `requirements.txt` - Dependencies
+- ✅ `README.md` - With team name at top
+- ✅ `.gitignore` - Excludes __pycache__ and CSVs (except prediction.csv)
+
+### Evaluation Criteria
+
+Your submission will be evaluated on:
+
+1. **Drift Detection Accuracy** (Hidden Data)
+2. **Drift Mitigation Performance** (Hidden Test Set)
+3. **Robustness & Scalability**
+4. **Report Quality**
+5. **Optional Dashboard** (Bonus points)
+6. **Presentation** (Top 10 finalists only)
+
+---
+
+## 🔍 Understanding the Dataset
+
+### Target Variable
+- **ChurnStatus**: Binary classification (Yes = 1, No = 0)
+- This is what we're predicting
+
+### Important Features
+- **CustomerID**: Must be preserved for prediction.csv output
+- **Month**: Excluded from features (time indicator)
+- **All other columns**: Used as features after encoding
+
+### Data Preprocessing
+Our solution automatically:
+1. Encodes categorical features using LabelEncoder
+2. Handles missing values
+3. Separates features from target and ID columns
+4. Prepares data for drift detection
+
+---
+
+## 💡 Tips for Your Team
+
+### Improving Performance
+
+1. **Feature Engineering**
+   - Create interaction features
+   - Derive new features from existing ones
+   - Handle high-cardinality categoricals
+
+2. **Drift Detection Tuning**
+   - Adjust `alpha` (significance level) in `DriftDetector`
+   - Tune `psi_threshold` for PSI test
+   - Experiment with different test combinations
+
+3. **Mitigation Strategies**
+   - Try different combinations of mitigation methods
+   - Adjust feature reweighting based on drift severity
+   - Consider data augmentation for high-severity drift
+
+4. **Model Training**
+   - Experiment with sample weighting
+   - Try different feature selection strategies
+   - Consider ensemble approaches (if allowed)
+
+### Common Pitfalls to Avoid
+
+1. ❌ **Don't modify LightGBM hyperparameters** - Challenge requirement
+2. ❌ **Don't forget to exclude Month column** - It's a time indicator
+3. ❌ **Don't forget CustomerID in prediction.csv** - Required format
+4. ❌ **Don't use GPU** - CPU only per challenge rules
+5. ❌ **Don't miss the deadline** - 12PM, 17 April 2026 (SGT)
+
+---
+
+## 🆘 Getting Help
+
+### Challenge Support
+- **GitHub Discussions**: Official forum for questions
+- **Help Desk**: Technical questions and troubleshooting
+- **Announcements**: Official updates during challenge
+
+### Team Resources
+- Review the code comments in `src/main.py`
+- Check the statistical tests in `src/drift_detector/statistical_tests.py`
+- Explore mitigation strategies in `src/mitigation/strategies.py`
+- Use the optional Streamlit dashboard for experimentation
+
+---
 
 ## 📄 License
 
-This project is developed for the Adaptive Drift Intelligence Challenge.
-
-## 🙏 Acknowledgments
-
-- Challenge organizers for the problem statement
-- Open-source community for excellent libraries
-- Statistical methods from research literature
+This project is developed for the NAISC Singtel 2026 Adaptive Drift Intelligence Challenge.
 
 ---
 
 **Built with ❤️ for the Adaptive Drift Intelligence Challenge**
+
+**Good luck to your team! 🚀**

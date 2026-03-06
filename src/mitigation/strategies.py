@@ -266,3 +266,41 @@ class DriftMitigator:
                 strategies[feature] = 'reweighting'
         
         return strategies
+    
+    def _calculate_feature_weights(self, drift_results: Dict,
+                                   features: List[str]) -> Dict[str, float]:
+        """
+        Calculate feature weights based on drift severity
+        
+        Args:
+            drift_results: Drift detection results (can be full results or feature_results dict)
+            features: List of feature names
+            
+        Returns:
+            Dictionary mapping features to weights
+        """
+        weights = {}
+        
+        # Handle both full drift_results and feature_results dict
+        if 'feature_results' in drift_results:
+            feature_results = drift_results['feature_results']
+        else:
+            feature_results = drift_results
+        
+        for feature in features:
+            if feature in feature_results:
+                results = feature_results[feature]
+                if results['drift_detected']:
+                    severity = results['severity']
+                    if severity == 'high':
+                        weights[feature] = 0.3
+                    elif severity == 'medium':
+                        weights[feature] = 0.6
+                    else:
+                        weights[feature] = 0.8
+                else:
+                    weights[feature] = 1.0
+            else:
+                weights[feature] = 1.0
+        
+        return weights
