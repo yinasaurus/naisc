@@ -1,6 +1,7 @@
 """Main entry point for NAISC Singtel 2026 challenge pipeline."""
 
 import argparse
+import textwrap
 import time
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -129,11 +130,92 @@ def get_feature_importance(model, columns: List[str]) -> Dict[str, float]:
     return {c: 0.0 for c in columns}
 
 
-def print_drift_table(drift_table: pd.DataFrame, mitigation_map: Dict[str, str]) -> None:
-    table = drift_table.copy()
-    table["mitigation"] = table["feature"].map(mitigation_map).fillna("none")
-    table = table[["feature", "feature_type", "test_used", "p_value", "psi", "severity", "drift_detected", "mitigation"]]
-    print_table(table, title="Columns with Drift")
+def _friendly_dtype_name(dtype_name: str) -> str:
+    lowered = dtype_name.lower()
+    if "int" in lowered:
+        return "Int"
+    if "float" in lowered:
+        return "Float"
+    return "Object"
+
+
+def _drift_description(row: pd.Series) -> str:
+    if row["feature_type"] == "numerical":
+        return (
+            f"Numeric distribution shift (KS p={row['p_value']:.3g}, PSI={row['psi']:.3f}); "
+            f"severity={row['severity']}"
+        )
+    return (
+        f"Categorical distribution shift (Chi2 p={row['p_value']:.3g}, PSI={row['psi']:.3f}); "
+        f"severity={row['severity']}"
+    )
+
+
+def _friendly_mitigation_name(value: str) -> str:
+    mapping = {
+        "log/robust_scaling": "Feature Scaling",
+        "pruned_high_drift_low_importance": "Drop Feature",
+        "categorical_monitoring": "Category Monitoring",
+        "none": "None",
+    }
+    return mapping.get(value, value.replace("_", " ").title())
+
+
+def _ascii_table(df: pd.DataFrame, wrap_map: Dict[str, int]) -> str:
+    cols = list(df.columns)
+    wrapped_rows = []
+    widths = {}
+    for c in cols:
+        widths[c] = max(len(c), wrap_map.get(c, len(c)))
+
+    for _, row in df.iterrows():
+        row_cells = {}
+        max_lines = 1
+        for c in cols:
+            txt = str(row[c])
+            wrap_w = wrap_map.get(c, 30)
+            lines = textwrap.wrap(txt, width=wrap_w) or [""]
+            row_cells[c] = lines
+            max_lines = max(max_lines, len(lines))
+            widths[c] = max(widths[c], max(len(l) for l in lines))
+        wrapped_rows.append((row_cells, max_lines))
+
+    sep = "+" + "+".join("-" * (widths[c] + 2) for c in cols) + "+"
+    out_lines = [sep]
+    header = "| " + " | ".join(c.ljust(widths[c]) for c in cols) + " |"
+    out_lines.extend([header, sep])
+    for row_cells, max_lines in wrapped_rows:
+        for i in range(max_lines):
+            parts = []
+            for c in cols:
+                lines = row_cells[c]
+                parts.append((lines[i] if i < len(lines) else "").ljust(widths[c]))
+            out_lines.append("| " + " | ".join(parts) + " |")
+        out_lines.append(sep)
+    return "\n".join(out_lines)
+
+
+def build_challenge_drift_table(
+    drift_table: pd.DataFrame, mitigation_map: Dict[str, str], raw_dtype_map: Dict[str, str]
+) -> pd.DataFrame:
+    only_drift = drift_table[drift_table["drift_detected"]].copy()
+    if only_drift.empty:
+        return pd.DataFrame(
+            columns=["Columns with Drift", "Column Type", "Drift Description", "Drift Mitigation"]
+        )
+
+    only_drift["Columns with Drift"] = only_drift["feature"]
+    only_drift["Column Type"] = only_drift["feature"].map(
+        lambda c: _friendly_dtype_name(raw_dtype_map.get(c, "object"))
+    )
+    only_drift["Drift Description"] = only_drift.apply(_drift_description, axis=1)
+    only_drift["Drift Mitigation"] = only_drift["feature"].map(
+        lambda c: _friendly_mitigation_name(mitigation_map.get(c, "none"))
+    )
+    out = only_drift[
+        ["Columns with Drift", "Column Type", "Drift Description", "Drift Mitigation"]
+    ]
+    return out
 
 
 def print_table(df: pd.DataFrame, title: str | None = None) -> None:
@@ -207,6 +289,7 @@ def main():
     train_df, test_df = load_data(args.train_data_filepath, args.test_data_filepath)
     x_train, y_train, x_test, test_ids, features = prepare_features(train_df, test_df)
     x_train_raw, x_test_raw = get_raw_feature_frames(train_df, test_df, features)
+    raw_dtype_map = {col: str(train_df[col].dtype) for col in features if col in train_df.columns}
 
     x_tr, y_tr, x_val, y_val = build_validation_split(train_df, x_train, y_train)
     baseline_model = train_lightgbm(x_tr, y_tr)
@@ -278,7 +361,19 @@ def main():
     print(f"  - Selected training mode: {best_variant}")
     if dropped:
         print(f"  - Pruned features: {', '.join(dropped)}")
-    print_drift_table(drift_table, mitigation_map)
+    challenge_drift_df = build_challenge_drift_table(drift_table, mitigation_map, raw_dtype_map)
+    print("\nColumns with Drift (Challenge-style Table)")
+    print(
+        _ascii_table(
+            challenge_drift_df,
+            wrap_map={
+                "Columns with Drift": 24,
+                "Column Type": 12,
+                "Drift Description": 60,
+                "Drift Mitigation": 24,
+            },
+        )
+    )
     print_table(ablation_df, title="Ablation summary (validation AU-PRC)")
 
     final_x_train = x_train_m
@@ -329,6 +424,19 @@ def main():
 
     ablation_df.to_csv("ablation_results.csv", index=False)
     drift_table.to_csv("drift_table.csv", index=False)
+    challenge_drift_df.to_csv("drift_mitigation_table.csv", index=False)
+    Path("drift_mitigation_table.txt").write_text(
+        _ascii_table(
+            challenge_drift_df,
+            wrap_map={
+                "Columns with Drift": 24,
+                "Column Type": 12,
+                "Drift Description": 60,
+                "Drift Mitigation": 24,
+            },
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| Columns with Drift       | Column Type  | Drift Description                                            | Drift Mitigation         |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| Contract                 | Object       | Categorical distribution shift (Chi2 p=0, PSI=25.956);       | Category Monitoring      |
+|                          |              | severity=high                                                |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| TransactionMode          | Object       | Categorical distribution shift (Chi2 p=0, PSI=2.723);        | Category Monitoring      |
+|                          |              | severity=high                                                |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| DigitalInvoicing         | Object       | Categorical distribution shift (Chi2 p=0, PSI=2.203);        | Category Monitoring      |
+|                          |              | severity=high                                                |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| LocationCity             | Object       | Categorical distribution shift (Chi2 p=2.05e-35, PSI=0.468); | Category Monitoring      |
+|                          |              | severity=high                                                |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| AvgMonthlyLongDistanceCh | Float        | Numeric distribution shift (KS p=0, PSI=0.278);              | Drop Feature             |
+| arges                    |              | severity=high                                                |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| NumberofReferrals        | Int          | Numeric distribution shift (KS p=0, PSI=0.172);              | Feature Scaling          |
+|                          |              | severity=medium                                              |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| ReferredaFriend          | Object       | Categorical distribution shift (Chi2 p=1.58e-270,            | Category Monitoring      |
+|                          |              | PSI=0.105); severity=medium                                  |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| MonthlyCharge            | Float        | Numeric distribution shift (KS p=3.47e-112, PSI=0.095);      | Feature Scaling          |
+|                          |              | severity=low                                                 |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| PrioritySupport          | Object       | Categorical distribution shift (Chi2 p=4.47e-241,            | Category Monitoring      |
+|                          |              | PSI=0.086); severity=low                                     |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| TotalLongDistanceCharges | Float        | Numeric distribution shift (KS p=5.53e-62, PSI=0.050);       | Feature Scaling          |
+|                          |              | severity=low                                                 |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| TotalCharges             | Float        | Numeric distribution shift (KS p=5.31e-06, PSI=0.006);       | Feature Scaling          |
+|                          |              | severity=low                                                 |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| Longitude                | Float        | Numeric distribution shift (KS p=0.0114, PSI=0.001);         | Feature Scaling          |
+|                          |              | severity=low                                                 |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
+| UserGender               | Object       | Categorical distribution shift (Chi2 p=0.0217, PSI=0.000);   | Category Monitoring      |
+|                          |              | severity=low                                                 |                          |
++--------------------------+--------------+--------------------------------------------------------------+--------------------------+
