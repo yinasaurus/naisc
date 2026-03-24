@@ -146,20 +146,27 @@ class DriftMitigator:
         test_df: pd.DataFrame,
         drift_table: pd.DataFrame,
         feature_importance: Dict[str, float],
+        apply_scaling: bool = True,
+        apply_delta_features: bool = True,
+        apply_seasonality: bool = True,
+        apply_pruning: bool = True,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, str], List[str]]:
         train_out = train_df.copy()
         test_out = test_df.copy()
         mitigation_map: Dict[str, str] = {}
+        to_drop: List[str] = []
 
-        # Strategy 1: robust/log scaling for numeric drifted features
         for _, row in drift_table.iterrows():
             feature = row["feature"]
-            if not row["drift_detected"]:
-                mitigation_map[feature] = "none"
-                continue
+            mitigation_map[feature] = "none" if not row["drift_detected"] else "categorical_monitoring"
 
-            if row["feature_type"] == "numerical":
-                # log1p only when all values are non-negative
+        # Strategy 1: robust/log scaling for numeric drifted features
+        if apply_scaling:
+            for _, row in drift_table.iterrows():
+                feature = row["feature"]
+                if (not row["drift_detected"]) or row["feature_type"] != "numerical":
+                    continue
+
                 tr_num = pd.to_numeric(train_out[feature], errors="coerce").fillna(train_out[feature].median())
                 te_num = pd.to_numeric(test_out[feature], errors="coerce").fillna(train_out[feature].median())
                 if tr_num.min() >= 0 and te_num.min() >= 0:
@@ -171,35 +178,35 @@ class DriftMitigator:
                 test_out[feature] = scaler.transform(te_num.to_frame()).ravel()
                 self.scalers[feature] = scaler
                 mitigation_map[feature] = "log/robust_scaling"
-            else:
-                mitigation_map[feature] = "categorical_monitoring"
 
         # Strategy 2: delta-based numeric features
-        numeric_cols = [c for c in train_out.columns if pd.api.types.is_numeric_dtype(train_out[c])]
-        for c in numeric_cols:
-            median_val = pd.to_numeric(train_out[c], errors="coerce").median()
-            train_out[f"{c}__delta_median"] = pd.to_numeric(train_out[c], errors="coerce") - median_val
-            test_out[f"{c}__delta_median"] = pd.to_numeric(test_out[c], errors="coerce") - median_val
+        if apply_delta_features:
+            numeric_cols = [c for c in train_out.columns if pd.api.types.is_numeric_dtype(train_out[c])]
+            for c in numeric_cols:
+                median_val = pd.to_numeric(train_out[c], errors="coerce").median()
+                train_out[f"{c}__delta_median"] = pd.to_numeric(train_out[c], errors="coerce") - median_val
+                test_out[f"{c}__delta_median"] = pd.to_numeric(test_out[c], errors="coerce") - median_val
 
         # Strategy 3: seasonality matching marker from Month (if present)
-        if "Month" in train_df.columns and "Month" in test_df.columns:
+        if apply_seasonality and "Month" in train_df.columns and "Month" in test_df.columns:
             test_months = set(test_df["Month"].astype(str).dropna().unique())
             train_out["__seasonality_match"] = train_df["Month"].astype(str).isin(test_months).astype(int).values
             test_out["__seasonality_match"] = 1
 
         # Strategy 4: drift-based pruning (high-drift + low-importance)
-        high_drift = set(drift_table.loc[drift_table["severity"] == "high", "feature"].tolist())
-        if feature_importance:
-            imp_values = np.array(list(feature_importance.values()))
-            threshold = float(np.quantile(imp_values, 0.35))
-        else:
-            threshold = 0.0
-        to_drop = [f for f in high_drift if feature_importance.get(f, 0.0) <= threshold]
-        if to_drop:
-            train_out = train_out.drop(columns=to_drop, errors="ignore")
-            test_out = test_out.drop(columns=to_drop, errors="ignore")
-            for f in to_drop:
-                mitigation_map[f] = "pruned_high_drift_low_importance"
+        if apply_pruning:
+            high_drift = set(drift_table.loc[drift_table["severity"] == "high", "feature"].tolist())
+            if feature_importance:
+                imp_values = np.array(list(feature_importance.values()))
+                threshold = float(np.quantile(imp_values, 0.35))
+            else:
+                threshold = 0.0
+            to_drop = [f for f in high_drift if feature_importance.get(f, 0.0) <= threshold]
+            if to_drop:
+                train_out = train_out.drop(columns=to_drop, errors="ignore")
+                test_out = test_out.drop(columns=to_drop, errors="ignore")
+                for f in to_drop:
+                    mitigation_map[f] = "pruned_high_drift_low_importance"
 
         return train_out, test_out, mitigation_map, to_drop
 

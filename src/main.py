@@ -133,13 +133,58 @@ def print_drift_table(drift_table: pd.DataFrame, mitigation_map: Dict[str, str])
     table = drift_table.copy()
     table["mitigation"] = table["feature"].map(mitigation_map).fillna("none")
     table = table[["feature", "feature_type", "test_used", "p_value", "psi", "severity", "drift_detected", "mitigation"]]
-    print(table.to_string(index=False, max_colwidth=40))
+    print_table(table, title="Columns with Drift")
+
+
+def print_table(df: pd.DataFrame, title: str | None = None) -> None:
+    if title:
+        print(f"\n{title}")
+    try:
+        from tabulate import tabulate
+
+        print(tabulate(df, headers="keys", tablefmt="grid", showindex=False))
+    except Exception:
+        print(df.to_string(index=False, max_colwidth=40))
 
 
 def save_outputs(model, test_ids: pd.Series, test_proba: np.ndarray, output_dir: Path = Path(".")) -> None:
     joblib.dump(model, output_dir / "model.joblib")
     pred_df = pd.DataFrame({"CustomerID": test_ids, "probability_score": test_proba})
     pred_df.to_csv(output_dir / "prediction.csv", index=False)
+
+
+def evaluate_variant(
+    variant_name: str,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    drift_table: pd.DataFrame,
+    feature_importance: Dict[str, float],
+    x_train: pd.DataFrame,
+    x_test: pd.DataFrame,
+    x_tr: pd.DataFrame,
+    y_tr: pd.Series,
+    x_val: pd.DataFrame,
+    y_val: pd.Series,
+    use_scaling: bool,
+    use_delta: bool,
+    use_seasonality: bool,
+    use_pruning: bool,
+) -> Tuple[float, pd.DataFrame, pd.DataFrame, Dict[str, str], List[str]]:
+    mitigator = DriftMitigator()
+    x_train_v, x_test_v, mitigation_map_v, dropped_v = mitigator.apply(
+        x_train,
+        x_test,
+        drift_table,
+        feature_importance,
+        apply_scaling=use_scaling,
+        apply_delta_features=use_delta,
+        apply_seasonality=use_seasonality,
+        apply_pruning=use_pruning,
+    )
+    model_v = train_lightgbm(x_train_v.loc[x_tr.index], y_tr)
+    val_proba_v = model_v.predict_proba(x_train_v.loc[x_val.index])[:, 1]
+    val_auprc_v = average_precision_score(y_val, val_proba_v)
+    return val_auprc_v, x_train_v, x_test_v, mitigation_map_v, dropped_v
 
 
 def main():
@@ -174,8 +219,49 @@ def main():
 
     detector = DriftDetector(alpha=0.05, psi_threshold=0.1)
     drift_table, drift_info = detector.detect(x_train_raw, x_test_raw, features)
-    mitigator = DriftMitigator()
-    x_train_m, x_test_m, mitigation_map, dropped = mitigator.apply(x_train, x_test, drift_table, importance)
+    variants = [
+        ("baseline", False, False, False, False),
+        ("scaling_only", True, False, False, False),
+        ("scaling_plus_delta", True, True, False, False),
+        ("full_policy", True, True, True, True),
+    ]
+
+    ablation_rows = []
+    variant_store = {}
+    for name, use_scaling, use_delta, use_seasonality, use_pruning in variants:
+        val_score, x_train_v, x_test_v, mitigation_map_v, dropped_v = evaluate_variant(
+            name,
+            train_df,
+            test_df,
+            drift_table,
+            importance,
+            x_train,
+            x_test,
+            x_tr,
+            y_tr,
+            x_val,
+            y_val,
+            use_scaling,
+            use_delta,
+            use_seasonality,
+            use_pruning,
+        )
+        ablation_rows.append(
+            {
+                "variant": name,
+                "val_auprc": float(val_score),
+                "use_scaling": use_scaling,
+                "use_delta": use_delta,
+                "use_seasonality": use_seasonality,
+                "use_pruning": use_pruning,
+                "pruned_features_count": len(dropped_v),
+            }
+        )
+        variant_store[name] = (x_train_v, x_test_v, mitigation_map_v, dropped_v)
+
+    ablation_df = pd.DataFrame(ablation_rows).sort_values("val_auprc", ascending=False)
+    best_variant = ablation_df.iloc[0]["variant"]
+    x_train_m, x_test_m, mitigation_map, dropped = variant_store[best_variant]
 
     drift_elapsed = time.time() - drift_start
     print("\n[1/3] Detecting data drift...")
@@ -185,21 +271,18 @@ def main():
     print(f"  - Drift percentage: {drift_info['drift_percentage']:.2f}%")
     print(f"  - Drift classifier AUC: {drift_info['drift_classifier_auc']:.6f}")
     print("\n[3/3] Applying mitigation strategies...")
-    base_val_proba = baseline_model.predict_proba(x_val)[:, 1]
-    base_val_auprc = average_precision_score(y_val, base_val_proba)
-    mitigated_model = train_lightgbm(x_train_m.loc[x_tr.index], y_tr)
-    mitigated_val_proba = mitigated_model.predict_proba(x_train_m.loc[x_val.index])[:, 1]
-    mitigated_val_auprc = average_precision_score(y_val, mitigated_val_proba)
-    selected_mode = "mitigated" if mitigated_val_auprc + 1e-4 >= base_val_auprc else "baseline"
+    base_val_auprc = float(ablation_df.loc[ablation_df["variant"] == "baseline", "val_auprc"].iloc[0])
+    best_val_auprc = float(ablation_df.iloc[0]["val_auprc"])
     print(f"  - Validation AU-PRC (baseline): {base_val_auprc:.6f}")
-    print(f"  - Validation AU-PRC (mitigated): {mitigated_val_auprc:.6f}")
-    print(f"  - Selected training mode: {selected_mode}")
+    print(f"  - Validation AU-PRC (best variant): {best_val_auprc:.6f}")
+    print(f"  - Selected training mode: {best_variant}")
     if dropped:
         print(f"  - Pruned features: {', '.join(dropped)}")
     print_drift_table(drift_table, mitigation_map)
+    print_table(ablation_df, title="Ablation summary (validation AU-PRC)")
 
-    final_x_train = x_train_m if selected_mode == "mitigated" else x_train
-    final_x_test = x_test_m if selected_mode == "mitigated" else x_test
+    final_x_train = x_train_m
+    final_x_test = x_test_m
 
     model = train_lightgbm(final_x_train, y_train)
     train_proba = model.predict_proba(final_x_train)[:, 1]
@@ -221,17 +304,31 @@ def main():
     print("\n" + "=" * 60)
     print("RUNTIME")
     print("=" * 60)
-    print(f"\nTime taken for drift detection and mitigation: {drift_elapsed:.2f} seconds")
-    print(f"Total runtime: {total_elapsed:.2f} seconds")
+    runtime_df = pd.DataFrame(
+        [
+            {"metric": "Time taken for drift detection and mitigation (s)", "value": round(drift_elapsed, 2)},
+            {"metric": "Total runtime (s)", "value": round(total_elapsed, 2)},
+        ]
+    )
+    print_table(runtime_df)
 
     print("\n" + "=" * 60)
     print("MODEL PERFORMANCE METRICS")
     print("=" * 60)
-    print(f"\nAU-PRC on training set: {train_auprc:.6f}")
-    if test_auprc is None:
-        print("AU-PRC on test set after mitigation: N/A (test labels not available)")
-    else:
-        print(f"AU-PRC on test set after mitigation: {test_auprc:.6f}")
+    perf_rows = [{"dataset": "Train Set", "AU-PRC": round(float(train_auprc), 6)}]
+    perf_rows.append(
+        {
+            "dataset": "Test Set",
+            "AU-PRC": "N/A (test labels not available)"
+            if test_auprc is None
+            else round(float(test_auprc), 6),
+        }
+    )
+    perf_df = pd.DataFrame(perf_rows)
+    print_table(perf_df)
+
+    ablation_df.to_csv("ablation_results.csv", index=False)
+    drift_table.to_csv("drift_table.csv", index=False)
 
 
 if __name__ == "__main__":

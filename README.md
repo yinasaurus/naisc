@@ -259,6 +259,14 @@ CustomerID,probability_score
 - CustomerID must match test set CustomerIDs
 - probability_score should be between 0 and 1
 
+**How to interpret churn risk**:
+- `probability_score` close to `0.0` = **low churn risk** (customer is unlikely to churn)
+- `probability_score` close to `1.0` = **high churn risk** (customer is likely to churn)
+- Practical rule of thumb:
+  - `< 0.30`: low risk
+  - `0.30 - 0.70`: medium risk
+  - `> 0.70`: high risk
+
 **model.joblib**: Binary file containing the trained LightGBM model (saved using joblib)
 
 **Note**: Refer to `NAISC-Singtel-2026/challenge_images/prediction_example.png` for visual reference of the exact format expected.
