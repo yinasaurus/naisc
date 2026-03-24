@@ -1,301 +1,237 @@
-"""
-Main entry point for NAISC Singtel 2026 Challenge
-Adaptive Drift Intelligence Challenge - Solution Pipeline
-"""
+"""Main entry point for NAISC Singtel 2026 challenge pipeline."""
 
 import argparse
 import time
-import pandas as pd
-import numpy as np
 from pathlib import Path
+from typing import Dict, List, Tuple
+
 import joblib
+import numpy as np
+import pandas as pd
 from sklearn.metrics import average_precision_score
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
-from drift_detector import DriftDetector
-from mitigation import DriftMitigator
+from utils import DriftDetector, DriftMitigator
 
-# Fixed LightGBM hyperparameters as per challenge requirements
+
 LIGHTGBM_PARAMS = {
-    'verbosity': -1,
-    'objective': 'binary',
-    'is_unbalance': True,
-    'random_state': 42,
-    'importance_type': 'gain'
+    "objective": "binary",
+    "is_unbalance": True,
+    "random_state": 42,
+    "importance_type": "gain",
+    "verbosity": -1,
+}
+
+REQUIRED_LIGHTGBM_PARAMS = {
+    "objective": "binary",
+    "is_unbalance": True,
+    "random_state": 42,
+    "importance_type": "gain",
+    "verbosity": -1,
 }
 
 
-def load_data(train_path: str, test_path: str):
-    """Load training and test datasets"""
+def load_data(train_path: str, test_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     print(f"Loading training data from: {train_path}")
     train_df = pd.read_csv(train_path)
-    
     print(f"Loading test data from: {test_path}")
     test_df = pd.read_csv(test_path)
-    
     return train_df, test_df
 
 
-def prepare_features(train_df: pd.DataFrame, test_df: pd.DataFrame):
-    """Prepare features and target variable"""
-    from sklearn.preprocessing import LabelEncoder
-    
-    # Identify target column (ChurnStatus)
-    target_col = 'ChurnStatus'
-    
-    # Identify ID column
-    id_col = 'CustomerID'
-    
-    # Get feature columns (exclude ID, target, and Month if present)
-    exclude_cols = [id_col, target_col, 'Month']
-    feature_cols = [col for col in train_df.columns if col not in exclude_cols]
-    
-    # Prepare data
-    X_train = train_df[feature_cols].copy()
+def prepare_features(train_df: pd.DataFrame, test_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, List[str]]:
+    target_col = "ChurnStatus"
+    id_col = "CustomerID"
+    exclude = {id_col, target_col, "Month"}
+    train_features = [c for c in train_df.columns if c not in exclude]
+    test_features = [c for c in test_df.columns if c not in exclude]
+    common_features = sorted(set(train_features).intersection(test_features))
+    if not common_features:
+        raise ValueError("No common train/test features found.")
+
+    x_train = train_df[common_features].copy()
+    x_test = test_df[common_features].copy()
     y_train = train_df[target_col].copy()
-    
-    X_test = test_df[feature_cols].copy()
-    test_ids = test_df[id_col].copy()
-    
-    # Encode target variable (Yes/No -> 1/0)
-    if y_train.dtype == 'object':
-        y_train = (y_train == 'Yes').astype(int)
-    
-    # Encode categorical features
-    label_encoders = {}
-    for col in feature_cols:
-        if X_train[col].dtype == 'object':
+    test_ids = test_df[id_col].copy() if id_col in test_df.columns else pd.Series(test_df.index.astype(str), name=id_col)
+
+    if y_train.dtype == "object":
+        y_norm = y_train.astype(str).str.lower().str.strip()
+        if set(y_norm.dropna().unique()).issubset({"yes", "no"}):
+            y_train = (y_norm == "yes").astype(int)
+        else:
+            y_train = LabelEncoder().fit_transform(y_norm.fillna("missing"))
+    y_train = pd.to_numeric(y_train, errors="coerce").fillna(0).astype(int)
+
+    for c in common_features:
+        if pd.api.types.is_numeric_dtype(x_train[c]):
+            med = pd.to_numeric(x_train[c], errors="coerce").median()
+            x_train[c] = pd.to_numeric(x_train[c], errors="coerce").fillna(med)
+            x_test[c] = pd.to_numeric(x_test[c], errors="coerce").fillna(med)
+        else:
             le = LabelEncoder()
-            # Fit on combined train and test to handle unseen categories
-            combined = pd.concat([X_train[col], X_test[col]], axis=0)
+            combined = pd.concat([x_train[c], x_test[c]], axis=0).fillna("missing").astype(str)
             le.fit(combined)
-            X_train[col] = le.transform(X_train[col])
-            X_test[col] = le.transform(X_test[col])
-            label_encoders[col] = le
-    
-    return X_train, y_train, X_test, test_ids, feature_cols, label_encoders
+            x_train[c] = le.transform(x_train[c].fillna("missing").astype(str))
+            x_test[c] = le.transform(x_test[c].fillna("missing").astype(str))
+
+    return x_train, y_train, x_test, test_ids, common_features
 
 
-def detect_and_mitigate_drift(train_df: pd.DataFrame, test_df: pd.DataFrame, 
-                              X_train: pd.DataFrame, X_test: pd.DataFrame):
-    """Detect drift and apply mitigation strategies"""
-    print("\n" + "="*60)
-    print("DATA DRIFT DETECTION & MITIGATION")
-    print("="*60)
-    
-    start_time = time.time()
-    
-    # Initialize detector
-    detector = DriftDetector(alpha=0.05, psi_threshold=0.2)
-    
-    # Detect drift
-    print("\n[1/3] Detecting data drift...")
-    drift_results = detector.detect_drift(
-        X_train, X_test,
-        use_multiple_tests=True
-    )
-    
-    # Get drifted features
-    drifted_features = detector.get_features_with_drift()
-    
-    # Print drift detection summary
-    print("\n[2/3] Drift Detection Summary:")
-    print(f"  - Total features analyzed: {drift_results['total_features']}")
-    print(f"  - Features with detected drift: {drift_results['features_with_drift']}")
-    print(f"  - Drift percentage: {drift_results['drift_percentage']:.2f}%")
-    
-    if drifted_features:
-        print(f"\n  Columns with detected drift:")
-        for feature in drifted_features:
-            feature_result = drift_results['feature_results'][feature]
-            drift_type = feature_result['feature_type']
-            severity = feature_result['severity']
-            print(f"    - {feature} ({drift_type}, severity: {severity})")
-    else:
-        print("\n  No drift detected in any features.")
-    
-    # Apply mitigation
-    print("\n[3/3] Applying mitigation strategies...")
-    mitigator = DriftMitigator()
-    
-    # Get recommended strategies
-    strategies = mitigator.get_mitigation_strategy(drift_results)
-    
-    # Apply robust scaling for numeric features
-    feature_types = detector.feature_types
-    X_train_mitigated, X_test_mitigated = mitigator.apply_robust_scaling(
-        X_train, X_test, feature_types
-    )
-    
-    # Apply domain adaptation for high-severity drifted features
-    high_severity_features = [
-        f for f, r in drift_results['feature_results'].items()
-        if r['drift_detected'] and r['severity'] == 'high'
-    ]
-    
-    if high_severity_features:
-        print(f"  Applying domain adaptation to {len(high_severity_features)} high-severity features...")
-        X_train_mitigated = mitigator.apply_domain_adaptation(
-            X_train_mitigated, X_test_mitigated, drift_results
-        )
-    
-    # Apply feature reweighting
-    X_train_weighted = mitigator.apply_feature_reweighting(
-        X_train_mitigated, X_test_mitigated, drift_results, method='inverse_drift'
-    )
-    
-    mitigation_methods = []
-    if high_severity_features:
-        mitigation_methods.append("Domain Adaptation")
-    mitigation_methods.append("Robust Scaling")
-    mitigation_methods.append("Feature Reweighting")
-    
-    print(f"\n  Mitigation methods applied: {', '.join(mitigation_methods)}")
-    
-    drift_time = time.time() - start_time
-    
-    return X_train_mitigated, X_test_mitigated, drift_results, drift_time, mitigation_methods
+def get_raw_feature_frames(train_df: pd.DataFrame, test_df: pd.DataFrame, features: List[str]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    raw_train = train_df[features].copy()
+    raw_test = test_df[features].copy()
+    return raw_train, raw_test
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series, 
-               X_test: pd.DataFrame, drift_results: dict):
-    """Train LightGBM model with fixed hyperparameters"""
-    print("\n" + "="*60)
-    print("MODEL TRAINING")
-    print("="*60)
-    
+def train_lightgbm(x_train: pd.DataFrame, y_train: pd.Series):
     import lightgbm as lgb
-    
-    # Create LightGBM model with fixed hyperparameters
+    if LIGHTGBM_PARAMS != REQUIRED_LIGHTGBM_PARAMS:
+        raise ValueError(
+            "LightGBM parameters must exactly match challenge requirements."
+        )
+
     model = lgb.LGBMClassifier(**LIGHTGBM_PARAMS)
-    
-    # Calculate sample weights based on drift
-    mitigator = DriftMitigator()
-    feature_weights = mitigator._calculate_feature_weights(drift_results, X_train.columns)
-    
-    # Convert feature weights to sample weights (simplified approach)
-    # In practice, you might want more sophisticated weighting
-    sample_weights = np.ones(len(X_train))
-    
-    # Train model
-    print("\nTraining LightGBM model with fixed hyperparameters...")
-    model.fit(
-        X_train, y_train,
-        sample_weight=sample_weights
-    )
-    
+    model.fit(x_train, y_train)
     return model
 
 
-def evaluate_model(model, X_train: pd.DataFrame, y_train: pd.Series,
-                  X_test: pd.DataFrame, y_test: pd.Series = None):
-    """Evaluate model using AU-PRC metric"""
-    print("\n" + "="*60)
-    print("MODEL PERFORMANCE METRICS")
-    print("="*60)
-    
-    # Get predictions
-    train_proba = model.predict_proba(X_train)[:, 1]
-    test_proba = model.predict_proba(X_test)[:, 1]
-    
-    # Calculate AU-PRC
-    train_auprc = average_precision_score(y_train, train_proba)
-    print(f"\nAU-PRC on training set: {train_auprc:.6f}")
-    
-    if y_test is not None:
-        test_auprc = average_precision_score(y_test, test_proba)
-        print(f"AU-PRC on test set after mitigation: {test_auprc:.6f}")
-        return train_auprc, test_auprc, test_proba
-    else:
-        return train_auprc, None, test_proba
+def build_validation_split(
+    train_df: pd.DataFrame, x_train: pd.DataFrame, y_train: pd.Series
+) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    if "Month" in train_df.columns:
+        month_series = train_df["Month"].astype(str)
+        month_counts = month_series.value_counts().sort_index()
+        if len(month_counts) >= 2:
+            holdout_month = month_counts.index[-1]
+            val_mask = month_series == holdout_month
+            if val_mask.sum() > 100 and (~val_mask).sum() > 100:
+                return (
+                    x_train.loc[~val_mask],
+                    y_train.loc[~val_mask],
+                    x_train.loc[val_mask],
+                    y_train.loc[val_mask],
+                )
+
+    x_tr, x_val, y_tr, y_val = train_test_split(
+        x_train,
+        y_train,
+        test_size=0.2,
+        random_state=42,
+        stratify=y_train,
+    )
+    return x_tr, y_tr, x_val, y_val
 
 
-def save_outputs(model, test_ids: pd.Series, test_proba: np.ndarray, 
-                output_dir: Path = Path('.')):
-    """Save model and predictions"""
-    # Save model
-    model_path = output_dir / 'model.joblib'
-    joblib.dump(model, model_path)
-    print(f"\nModel saved to: {model_path}")
-    
-    # Save predictions
-    prediction_df = pd.DataFrame({
-        'CustomerID': test_ids,
-        'probability_score': test_proba
-    })
-    
-    prediction_path = output_dir / 'prediction.csv'
-    prediction_df.to_csv(prediction_path, index=False)
-    print(f"Predictions saved to: {prediction_path}")
-    
-    return model_path, prediction_path
+def get_feature_importance(model, columns: List[str]) -> Dict[str, float]:
+    if hasattr(model, "feature_importances_"):
+        return {c: float(v) for c, v in zip(columns, model.feature_importances_)}
+    return {c: 0.0 for c in columns}
+
+
+def print_drift_table(drift_table: pd.DataFrame, mitigation_map: Dict[str, str]) -> None:
+    table = drift_table.copy()
+    table["mitigation"] = table["feature"].map(mitigation_map).fillna("none")
+    table = table[["feature", "feature_type", "test_used", "p_value", "psi", "severity", "drift_detected", "mitigation"]]
+    print(table.to_string(index=False, max_colwidth=40))
+
+
+def save_outputs(model, test_ids: pd.Series, test_proba: np.ndarray, output_dir: Path = Path(".")) -> None:
+    joblib.dump(model, output_dir / "model.joblib")
+    pred_df = pd.DataFrame({"CustomerID": test_ids, "probability_score": test_proba})
+    pred_df.to_csv(output_dir / "prediction.csv", index=False)
 
 
 def main():
-    """Main pipeline"""
-    parser = argparse.ArgumentParser(
-        description='NAISC Singtel 2026: Adaptive Drift Intelligence Challenge'
+    parser = argparse.ArgumentParser(description="NAISC Singtel 2026 challenge pipeline")
+    parser.add_argument(
+        "--train_data_filepath",
+        type=str,
+        default="NAISC-Singtel-2026/public_data/train.csv",
+        help="Path to training CSV (default: public_data/train.csv)",
     )
     parser.add_argument(
-        '--train_data_filepath',
+        "--test_data_filepath",
         type=str,
-        required=True,
-        help='Path to training data CSV file'
+        default="NAISC-Singtel-2026/public_data/test.csv",
+        help="Path to test CSV (default: public_data/test.csv)",
     )
-    parser.add_argument(
-        '--test_data_filepath',
-        type=str,
-        required=True,
-        help='Path to test data CSV file'
-    )
-    
     args = parser.parse_args()
-    
-    # Record total start time
-    total_start_time = time.time()
-    
-    try:
-        # Load data
-        train_df, test_df = load_data(args.train_data_filepath, args.test_data_filepath)
-        
-        # Prepare features
-        X_train, y_train, X_test, test_ids, feature_cols, label_encoders = prepare_features(
-            train_df, test_df
-        )
-        
-        # Detect and mitigate drift
-        X_train_mitigated, X_test_mitigated, drift_results, drift_time, mitigation_methods = \
-            detect_and_mitigate_drift(train_df, test_df, X_train, X_test)
-        
-        # Train model
-        model = train_model(X_train_mitigated, y_train, X_test_mitigated, drift_results)
-        
-        # Evaluate model
-        train_auprc, test_auprc, test_proba = evaluate_model(
-            model, X_train_mitigated, y_train, X_test_mitigated
-        )
-        
-        # Save outputs
-        model_path, prediction_path = save_outputs(model, test_ids, test_proba)
-        
-        # Print runtime
-        total_time = time.time() - total_start_time
-        print("\n" + "="*60)
-        print("RUNTIME")
-        print("="*60)
-        print(f"\nTime taken for drift detection and mitigation: {drift_time:.2f} seconds")
-        print(f"Total runtime: {total_time:.2f} seconds")
-        
-        print("\n" + "="*60)
-        print("PIPELINE COMPLETED SUCCESSFULLY")
-        print("="*60)
-        
-    except Exception as e:
-        print(f"\nERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise
+
+    total_start = time.time()
+    train_df, test_df = load_data(args.train_data_filepath, args.test_data_filepath)
+    x_train, y_train, x_test, test_ids, features = prepare_features(train_df, test_df)
+    x_train_raw, x_test_raw = get_raw_feature_frames(train_df, test_df, features)
+
+    x_tr, y_tr, x_val, y_val = build_validation_split(train_df, x_train, y_train)
+    baseline_model = train_lightgbm(x_tr, y_tr)
+    importance = get_feature_importance(baseline_model, list(x_tr.columns))
+
+    print("\n" + "=" * 60)
+    print("DATA DRIFT DETECTION & MITIGATION")
+    print("=" * 60)
+    drift_start = time.time()
+
+    detector = DriftDetector(alpha=0.05, psi_threshold=0.1)
+    drift_table, drift_info = detector.detect(x_train_raw, x_test_raw, features)
+    mitigator = DriftMitigator()
+    x_train_m, x_test_m, mitigation_map, dropped = mitigator.apply(x_train, x_test, drift_table, importance)
+
+    drift_elapsed = time.time() - drift_start
+    print("\n[1/3] Detecting data drift...")
+    print("[2/3] Drift Detection Summary:")
+    print(f"  - Total features analyzed: {drift_info['total_features']}")
+    print(f"  - Features with detected drift: {drift_info['features_with_drift']}")
+    print(f"  - Drift percentage: {drift_info['drift_percentage']:.2f}%")
+    print(f"  - Drift classifier AUC: {drift_info['drift_classifier_auc']:.6f}")
+    print("\n[3/3] Applying mitigation strategies...")
+    base_val_proba = baseline_model.predict_proba(x_val)[:, 1]
+    base_val_auprc = average_precision_score(y_val, base_val_proba)
+    mitigated_model = train_lightgbm(x_train_m.loc[x_tr.index], y_tr)
+    mitigated_val_proba = mitigated_model.predict_proba(x_train_m.loc[x_val.index])[:, 1]
+    mitigated_val_auprc = average_precision_score(y_val, mitigated_val_proba)
+    selected_mode = "mitigated" if mitigated_val_auprc + 1e-4 >= base_val_auprc else "baseline"
+    print(f"  - Validation AU-PRC (baseline): {base_val_auprc:.6f}")
+    print(f"  - Validation AU-PRC (mitigated): {mitigated_val_auprc:.6f}")
+    print(f"  - Selected training mode: {selected_mode}")
+    if dropped:
+        print(f"  - Pruned features: {', '.join(dropped)}")
+    print_drift_table(drift_table, mitigation_map)
+
+    final_x_train = x_train_m if selected_mode == "mitigated" else x_train
+    final_x_test = x_test_m if selected_mode == "mitigated" else x_test
+
+    model = train_lightgbm(final_x_train, y_train)
+    train_proba = model.predict_proba(final_x_train)[:, 1]
+    test_proba = model.predict_proba(final_x_test)[:, 1]
+    train_auprc = average_precision_score(y_train, train_proba)
+
+    test_auprc = None
+    if "ChurnStatus" in test_df.columns:
+        y_test_raw = test_df["ChurnStatus"].copy()
+        if y_test_raw.dtype == "object":
+            y_test = (y_test_raw.astype(str).str.lower().str.strip() == "yes").astype(int)
+        else:
+            y_test = pd.to_numeric(y_test_raw, errors="coerce").fillna(0).astype(int)
+        test_auprc = average_precision_score(y_test, test_proba)
+
+    save_outputs(model, test_ids, test_proba)
+
+    total_elapsed = time.time() - total_start
+    print("\n" + "=" * 60)
+    print("RUNTIME")
+    print("=" * 60)
+    print(f"\nTime taken for drift detection and mitigation: {drift_elapsed:.2f} seconds")
+    print(f"Total runtime: {total_elapsed:.2f} seconds")
+
+    print("\n" + "=" * 60)
+    print("MODEL PERFORMANCE METRICS")
+    print("=" * 60)
+    print(f"\nAU-PRC on training set: {train_auprc:.6f}")
+    if test_auprc is None:
+        print("AU-PRC on test set after mitigation: N/A (test labels not available)")
+    else:
+        print(f"AU-PRC on test set after mitigation: {test_auprc:.6f}")
 
 
 if __name__ == "__main__":

@@ -165,8 +165,29 @@ After running, you'll get:
 
 ## 📊 Expected Output Format
 
-### Console Output Example
+**⚠️ Important**: The challenge provides example images in `NAISC-Singtel-2026/challenge_images/` showing the exact expected format. You should refer to these images for visual reference:
 
+- **`drift_output.png`**: Shows the exact format for Data Drift Detection & Mitigation Summary
+- **`runtime_output.png`**: Shows the exact format for Runtime output
+- **`performance_output.png`**: Shows the exact format for Model Performance Metrics
+- **`prediction_example.png`**: Shows the exact format for prediction.csv file
+- **`evaluation_breakdown.png`**: Shows the evaluation criteria breakdown
+- **`challenge_overview.png`**: Shows the challenge overview diagram
+
+**Always check these images** to ensure your output format matches exactly what the judges expect!
+
+### Console Output Requirements
+
+Your solution must print **exactly three sections** in this order:
+
+#### 1. Data Drift Detection & Mitigation Summary
+
+Must include:
+- Columns with detected drift (list all drifted features)
+- Type of drift detected (numeric, categorical, etc.)
+- Mitigation methods applied (list all methods used)
+
+**Example Format**:
 ```
 ============================================================
 DATA DRIFT DETECTION & MITIGATION
@@ -186,35 +207,45 @@ DATA DRIFT DETECTION & MITIGATION
     
 [3/3] Applying mitigation strategies...
   Mitigation methods applied: Domain Adaptation, Robust Scaling, Feature Reweighting
+```
 
-============================================================
-MODEL TRAINING
-============================================================
+#### 2. Runtime (in seconds)
 
-Training LightGBM model with fixed hyperparameters...
+Must show:
+- Time taken for drift detection and mitigation
+- Total runtime (optional but recommended)
 
-============================================================
-MODEL PERFORMANCE METRICS
-============================================================
-
-AU-PRC on training set: 0.823456
-AU-PRC on test set after mitigation: 0.789123
-
+**Example Format**:
+```
 ============================================================
 RUNTIME
 ============================================================
 
 Time taken for drift detection and mitigation: 12.34 seconds
 Total runtime: 45.67 seconds
-
-============================================================
-PIPELINE COMPLETED SUCCESSFULLY
-============================================================
 ```
+
+#### 3. Model Performance Metrics
+
+Must include:
+- AU-PRC on training set (6 decimal places)
+- AU-PRC on test set after mitigation (6 decimal places)
+
+**Example Format**:
+```
+============================================================
+MODEL PERFORMANCE METRICS
+============================================================
+
+AU-PRC on training set: 0.823456
+AU-PRC on test set after mitigation: 0.789123
+```
+
+**Important**: The exact format may vary, but all three sections must be clearly printed to the console.
 
 ### Output Files
 
-**prediction.csv**:
+**prediction.csv** (Required format):
 ```csv
 CustomerID,probability_score
 1610a102a7854c5d,0.234567
@@ -222,7 +253,15 @@ CustomerID,probability_score
 ...
 ```
 
-**model.joblib**: Binary file containing the trained LightGBM model
+**Important**: 
+- Must be in root directory
+- Must have exactly 2 columns: `CustomerID` and `probability_score`
+- CustomerID must match test set CustomerIDs
+- probability_score should be between 0 and 1
+
+**model.joblib**: Binary file containing the trained LightGBM model (saved using joblib)
+
+**Note**: Refer to `NAISC-Singtel-2026/challenge_images/prediction_example.png` for visual reference of the exact format expected.
 
 ---
 
@@ -232,14 +271,10 @@ CustomerID,probability_score
 .
 ├── src/
 │   ├── main.py                    # Main entry point (CHALLENGE REQUIRED)
-│   ├── drift_detector/
-│   │   ├── detector.py           # Main drift detection logic
-│   │   └── statistical_tests.py  # Statistical test implementations
-│   ├── mitigation/
-│   │   ├── strategies.py         # Mitigation strategies
-│   │   └── adaptive_training.py  # Training utilities
-│   └── visualization/
-│       └── plotter.py            # Visualization (optional)
+│   ├── utils.py                   # DriftDetector + DriftMitigator (active pipeline)
+│   ├── drift_detector/            # Legacy/experimental module
+│   ├── mitigation/                # Legacy/experimental module
+│   └── visualization/             # Optional plotting helpers
 ├── app.py                         # Streamlit dashboard (OPTIONAL)
 ├── requirements.txt              # Python dependencies
 ├── .gitignore                    # Git ignore rules
@@ -261,15 +296,17 @@ CustomerID,probability_score
 
 ### Key Components
 
-#### Drift Detection (`src/drift_detector/`)
+#### Drift + Mitigation (`src/utils.py`)
 
-- **DriftDetector**: Main class that orchestrates drift detection
-- **StatisticalTests**: Collection of statistical tests (KS, Mann-Whitney, Chi-square, PSI, Wasserstein)
-
-#### Mitigation (`src/mitigation/`)
-
-- **DriftMitigator**: Implements mitigation strategies
-- **AdaptiveTrainer**: Training utilities (not used in main.py, but available)
+- **DriftDetector**:
+  - Numerical: **K-S + PSI**
+  - Categorical: **Chi-square + PSI**
+  - Advanced: **Drift Classifier AUC** (domain classifier)
+- **DriftMitigator**:
+  - **Log/Robust scaling** on drifted numeric features
+  - **Delta-based features** (`<feature>__delta_median`)
+  - **Seasonality match feature** when `Month` exists
+  - **Drift-based feature pruning** (high-drift + low-importance)
 
 #### Main Pipeline (`src/main.py`)
 
@@ -283,31 +320,30 @@ CustomerID,probability_score
 
 ### Main Entry Point: `src/main.py`
 
-This is the **only file** that will be executed for the challenge. It:
-1. Parses command-line arguments
-2. Loads data
-3. Calls drift detection
-4. Applies mitigation
-5. Trains model
-6. Generates outputs
+This is the **only file** executed for challenge runs. It:
+1. Parses CLI arguments (with defaults to public data paths)
+2. Loads and prepares train/test data
+3. Runs drift detection and prints drift table
+4. Applies mitigation strategies by feature
+5. Trains standardized LightGBM
+6. Writes `prediction.csv` and `model.joblib`
 
 ### Key Functions to Understand
 
-- `load_data()`: Reads CSV files
-- `prepare_features()`: Encodes categoricals, prepares features
-- `detect_and_mitigate_drift()`: Main drift detection and mitigation logic
-- `train_model()`: Trains LightGBM with fixed hyperparameters
-- `evaluate_model()`: Calculates AU-PRC metrics
-- `save_outputs()`: Creates prediction.csv and model.joblib
+- `load_data()`: Reads training and test CSVs
+- `prepare_features()`: Handles encoding, missing values, and train/test feature alignment
+- `train_lightgbm()`: Trains LightGBM with fixed challenge hyperparameters
+- `print_drift_table()`: Prints "Data Drift Detection & Mitigation" output table
+- `save_outputs()`: Creates `prediction.csv` and `model.joblib`
 
 ### How to Modify
 
-If you want to improve the solution:
+If you want to improve the active solution:
 
-1. **Better Drift Detection**: Modify `src/drift_detector/statistical_tests.py`
-2. **Better Mitigation**: Modify `src/mitigation/strategies.py`
-3. **Feature Engineering**: Add to `prepare_features()` in `src/main.py`
-4. **Different Strategies**: Modify `detect_and_mitigate_drift()` in `src/main.py`
+1. **Drift Rules / Thresholds**: Modify `DriftDetector` in `src/utils.py`
+2. **Mitigation Policy**: Modify `DriftMitigator` in `src/utils.py`
+3. **Feature Engineering**: Extend `prepare_features()` in `src/main.py`
+4. **Output Formatting**: Adjust `print_drift_table()` in `src/main.py`
 
 ---
 
@@ -500,10 +536,11 @@ Your repo must have this exact structure:
 ```
 .
 ├── src/                    # Solution source code
-│   ├── main.py            # Main function (REQUIRED)
-│   ├── drift_detector/    # Drift detection module
-│   ├── mitigation/         # Mitigation strategies
-│   └── visualization/     # Visualization (optional)
+│   ├── main.py             # Main function (REQUIRED)
+│   ├── utils.py            # Active drift+mitigation implementation
+│   ├── drift_detector/     # Optional legacy/experimental module
+│   ├── mitigation/         # Optional legacy/experimental module
+│   └── visualization/      # Visualization (optional)
 ├── notebooks/              # (Optional) Jupyter notebooks
 │   └── xxx.ipynb
 ├── prediction.csv         # REQUIRED: Predictions on public test set
@@ -552,8 +589,8 @@ Your submission will be evaluated on:
 Our solution automatically:
 1. Encodes categorical features using LabelEncoder
 2. Handles missing values
-3. Separates features from target and ID columns
-4. Prepares data for drift detection
+3. Aligns train/test to common features
+4. Runs drift detection on raw features before encoded mitigation/training
 
 ---
 
@@ -600,8 +637,8 @@ Our solution automatically:
 
 ### Team Resources
 - Review the code comments in `src/main.py`
-- Check the statistical tests in `src/drift_detector/statistical_tests.py`
-- Explore mitigation strategies in `src/mitigation/strategies.py`
+- Check active drift and mitigation logic in `src/utils.py`
+- Use `src/drift_detector/` and `src/mitigation/` as optional reference modules
 - Use the optional Streamlit dashboard for experimentation
 
 ---

@@ -69,3 +69,6 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+
+# Local challenge sandbox data
+NAISC-Singtel-2026/
