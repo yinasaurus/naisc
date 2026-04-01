@@ -5,135 +5,55 @@
 |                          |              | compared to training set.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | TransactionMode          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.468.                                    |                          |
+|                          |              | sets. Effect size: 0.220.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | DigitalInvoicing         | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.419.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| VoiceService             | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.171.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Offer                    | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.243.                                    |                          |
+|                          |              | sets. Effect size: 0.222.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | LocationCity             | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.341.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| RetireeStatus            | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.160.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| YoungAdultFlag           | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.156.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Dependents               | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.137.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| ConnectivityType         | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.117.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| InternetType             | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.113.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| CyberSecuritySvc         | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.102.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| PrioritySupport          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.104.                                    |                          |
+|                          |              | sets. Effect size: 0.146.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | AvgMonthlyLongDistanceCh | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-| arges                    |              | Effect size: 0.389. Train sample skewness ~0.415 (mildly     |                          |
+| arges                    |              | Effect size: 0.451. Train sample skewness ~0.415 (mildly     |                          |
 |                          |              | right-skewed); test ~0.048 (approximately symmetric). Shape  |                          |
 |                          |              | drift: test skewness is lower than train (distribution       |                          |
 |                          |              | relatively less right-heavy or more left-heavy vs train).    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| UnlimitedData            | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.090.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| CloudStorageSvc          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.075.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| HardwareInsurance        | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.074.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | NumberofReferrals        | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.346. Train sample skewness ~1.480 (right-     |                          |
+|                          |              | Effect size: 0.387. Train sample skewness ~1.480 (right-     |                          |
 |                          |              | skewed); test ~0.826 (right-skewed). Shape drift: test       |                          |
 |                          |              | skewness is lower than train (distribution relatively less   |                          |
 |                          |              | right-heavy or more left-heavy vs train).                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| AudioSvc                 | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.072.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| VideoSvc_A               | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.057.                                    |                          |
+| ReferredaFriend          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets. Effect size: 0.121.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | MonthlyCharge            | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.190. Train sample skewness ~-0.079            |                          |
-|                          |              | (approximately symmetric); test ~-0.126 (approximately       |                          |
+|                          |              | Effect size: 0.204. Train sample skewness ~-0.079            |                          |
+|                          |              | (approximately symmetric); test ~-0.127 (approximately       |                          |
 |                          |              | symmetric). Skewness is broadly comparable between train and |                          |
 |                          |              | test.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| VideoSvc_B               | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.055.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| AdditionalLines          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.041.                                    |                          |
+| PrioritySupport          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets. Effect size: 0.114.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | TotalLongDistanceCharges | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.211. Train sample skewness ~1.477 (right-     |                          |
-|                          |              | skewed); test ~1.242 (right-skewed). Shape drift: test       |                          |
+|                          |              | Effect size: 0.252. Train sample skewness ~1.477 (right-     |                          |
+|                          |              | skewed); test ~1.241 (right-skewed). Shape drift: test       |                          |
 |                          |              | skewness is lower than train (distribution relatively less   |                          |
 |                          |              | right-heavy or more left-heavy vs train).                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| ReferredaFriend          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.029.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Married                  | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.014.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | TotalCharges             | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.048. Train sample skewness ~0.979 (right-     |                          |
-|                          |              | skewed); test ~0.974 (right-skewed). Skewness is broadly     |                          |
+|                          |              | Effect size: 0.050. Train sample skewness ~0.979 (right-     |                          |
+|                          |              | skewed); test ~0.975 (right-skewed). Skewness is broadly     |                          |
 |                          |              | comparable between train and test.                           |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | Longitude                | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.027. Train sample skewness ~-0.078            |                          |
-|                          |              | (approximately symmetric); test ~-0.051 (approximately       |                          |
+|                          |              | Effect size: 0.026. Train sample skewness ~-0.078            |                          |
+|                          |              | (approximately symmetric); test ~-0.052 (approximately       |                          |
 |                          |              | symmetric). Skewness is broadly comparable between train and |                          |
 |                          |              | test.                                                        |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| UserAge                  | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.005. Train sample skewness ~0.177             |                          |
-|                          |              | (approximately symmetric); test ~0.160 (approximately        |                          |
-|                          |              | symmetric). Skewness is broadly comparable between train and |                          |
-|                          |              | test.                                                        |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Latitude                 | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.022. Train sample skewness ~0.307 (mildly     |                          |
-|                          |              | right-skewed); test ~0.288 (mildly right-skewed). Skewness   |                          |
-|                          |              | is broadly comparable between train and test.                |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| TotalRevenue             | Float        | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.003. Train sample skewness ~0.928 (right-     |                          |
-|                          |              | skewed); test ~0.911 (right-skewed). Skewness is broadly     |                          |
-|                          |              | comparable between train and test.                           |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| AreaCode                 | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.014. Train sample skewness ~-0.173            |                          |
-|                          |              | (approximately symmetric); test ~-0.203 (mildly left-        |                          |
-|                          |              | skewed). Skewness is broadly comparable between train and    |                          |
-|                          |              | test.                                                        |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Population               | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.001. Train sample skewness ~0.912 (right-     |                          |
-|                          |              | skewed); test ~0.926 (right-skewed). Skewness is broadly     |                          |
-|                          |              | comparable between train and test.                           |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | UserGender               | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
-|                          |              | sets. Effect size: 0.005.                                    |                          |
-+--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| NumberofDependents       | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
-|                          |              | Effect size: 0.013. Train sample skewness ~2.592 (right-     |                          |
-|                          |              | skewed); test ~2.483 (right-skewed). Skewness is broadly     |                          |
-|                          |              | comparable between train and test.                           |                          |
+|                          |              | sets. Effect size: 0.008.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+

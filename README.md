@@ -135,7 +135,7 @@ python .\src\main.py --train_data_filepath .\dataset\train.csv --test_data_filep
 | `drift_table.csv` | Full drift metrics per feature (p-values, PSI, flags; **CSV only**, not printed) |
 | `ablation_results.csv` | Validation AU-PRC for each mitigation variant (same as console grid) |
 | `runtime_summary.csv` | Drift+mitigation timing and total runtime (same as console RUNTIME table) |
-| `model_performance.csv` | Train / test AU-PRC rows (same as console MODEL PERFORMANCE table) |
+| `model_performance.csv` | First column unlabeled in console (`""` in CSV): `Train Set` / `Test Set`; `AU-PRC` to 3 decimals when labels exist (same as console MODEL PERFORMANCE table) |
 | `prediction.csv` | Test predictions: `CustomerID`, `probability_score` (comma-separated) |
 | `prediction.txt` | Same predictions as UTF-8 **tab-separated** text (one row per line, header row) |
 | `model.joblib` | Trained LightGBM model |

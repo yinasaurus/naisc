@@ -38,6 +38,8 @@ IMPORTANCE_FIT_MAX_ROWS = 300_000
 ABLATION_FIT_MAX_ROWS = 350_000
 ABLATION_VAL_MAX_ROWS = 120_000
 SCALABILITY_LOG_MIN_ROWS = 200_000
+# Console preview of prediction.csv (organiser example format); full scores only on disk.
+PREDICTION_PREVIEW_ROWS = 5
 # Each ablation runs full mitigation on all train/test rows then a LightGBM fit — dominant cost at huge n.
 ABLATION_FULL_VARIANT_ROW_THRESHOLD = 400_000
 SCALABILITY_TIGHT_ROW_THRESHOLD = 800_000
@@ -394,6 +396,30 @@ def _ascii_table(df: pd.DataFrame, wrap_map: Dict[str, int]) -> str:
     return "\n".join(out_lines)
 
 
+def _infer_wrap_map(df: pd.DataFrame, default: int = 40) -> Dict[str, int]:
+    wm: Dict[str, int] = {}
+    for c in df.columns:
+        lens = [len(str(c))]
+        for v in df[c].head(200):
+            lens.append(len(str(v)))
+        mx = max(lens) if lens else default
+        mx = max(mx, len(str(c)))
+        wm[c] = min(mx, 72)
+    return wm
+
+
+def print_ascii_dataframe(
+    df: pd.DataFrame,
+    title: str | None = None,
+    wrap_map: Dict[str, int] | None = None,
+) -> None:
+    """Print organiser-style +---+ ASCII tables (no tabulate/grid)."""
+    if title:
+        print(f"\n{title}")
+    wm = wrap_map if wrap_map is not None else _infer_wrap_map(df)
+    print(_ascii_table(df, wm))
+
+
 def build_challenge_drift_table(
     drift_table: pd.DataFrame, mitigation_map: Dict[str, str], raw_dtype_map: Dict[str, str]
 ) -> pd.DataFrame:
@@ -417,17 +443,6 @@ def build_challenge_drift_table(
         ["Columns with Drift", "Column Type", "Drift Description", "Drift Mitigation"]
     ]
     return out
-
-
-def print_table(df: pd.DataFrame, title: str | None = None) -> None:
-    if title:
-        print(f"\n{title}")
-    try:
-        from tabulate import tabulate
-
-        print(tabulate(df, headers="keys", tablefmt="grid", showindex=False))
-    except Exception:
-        print(df.to_string(index=False, max_colwidth=40))
 
 
 def save_outputs(model, test_ids: pd.Series, test_proba: np.ndarray, output_dir: Path = Path(".")) -> None:
@@ -527,8 +542,9 @@ def main():
     """See module docstring at top of file for LightGBM params and pipeline stages.
 
     Console vs disk:
-    - **Stdout:** progress lines, drift summary stats, mitigation selection, ASCII drift table,
-      ablation grid, runtime table, AU-PRC table, file path list (no raw prediction dump).
+    - **Stdout:** progress lines, drift summary stats, mitigation selection, organiser-style
+      ``+---+`` ASCII tables (drift / ablation / time taken / AU-PRC), first N-row prediction
+      preview, file path list (full scores only in ``prediction.csv``).
     - **Disk:** all structured tables also written as CSV (and prediction.txt) via
       ``write_csv_reports`` + ``save_outputs``.
     """
@@ -606,10 +622,10 @@ def main():
     else:
         x_val_ab, y_val_ab = x_val, y_val
 
-    print("\n" + "=" * 60)
-    print("DATA DRIFT DETECTION & MITIGATION SUMMARY")
-    print("(Per organisers: drift findings, mitigation choices, runtime, AU-PRC.)")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("DATA DRIFT DETECTION AND MITIGATION SUMMARY")
+    print("(Drift findings, mitigation, runtime, AU-PRC — organiser-required console format.)")
+    print("=" * 70)
     if len(train_df) >= SCALABILITY_LOG_MIN_ROWS or scalability_notes:
         extra = "; ".join(scalability_notes) if scalability_notes else "detector subsampling only"
         print(
@@ -682,9 +698,29 @@ def main():
             "Drift Mitigation": 24,
         },
     )
-    print("\nColumns with detected drift | Column type | Drift description | Mitigation applied")
+    print("\n" + "=" * 70)
+    print("DATA DRIFT DETECTION AND MITIGATION")
+    print("=" * 70)
     print(challenge_drift_ascii)
-    print_table(ablation_df, title="Ablation summary (validation AU-PRC)")
+    ablation_show = ablation_df.rename(
+        columns={
+            "variant": "Variant",
+            "val_auprc": "AU-PRC",
+            "strategies": "Strategies",
+            "pruned_features_count": "N pruned",
+        }
+    ).copy()
+    ablation_show["AU-PRC"] = np.round(ablation_show["AU-PRC"].astype(float), 6)
+    print_ascii_dataframe(
+        ablation_show,
+        title="ABLATION SUMMARY (VALIDATION AU-PRC)",
+        wrap_map={
+            "Variant": 22,
+            "AU-PRC": 10,
+            "Strategies": 52,
+            "N pruned": 8,
+        },
+    )
 
     final_x_train = x_train_m
     final_x_test = x_test_m
@@ -714,24 +750,25 @@ def main():
     runtime_df = pd.DataFrame(
         [
             {
-                "metric": "Time taken for drift detection and mitigation (s)",
-                "value": round(drift_elapsed, 2),
+                "Stage": "Drift detection and mitigation",
+                "Time Taken (s)": round(drift_elapsed, 2),
             },
-            {"metric": "Total end-to-end runtime (s)", "value": round(total_elapsed, 2)},
+            {"Stage": "Total end-to-end", "Time Taken (s)": round(total_elapsed, 2)},
         ]
     )
-    perf_rows = [
-        {"dataset": "Train Set (mitigated features, full train)", "AU-PRC": round(float(train_auprc), 6)}
-    ]
-    perf_rows.append(
-        {
-            "dataset": "Test Set (mitigated features; need labels in test CSV)",
-            "AU-PRC": "N/A (test labels not available)"
-            if test_auprc is None
-            else round(float(test_auprc), 6),
-        }
+    perf_df = pd.DataFrame(
+        [
+            {"": "Train Set", "AU-PRC": round(float(train_auprc), 3)},
+            {
+                "": "Test Set",
+                "AU-PRC": (
+                    "N/A (no labels in test CSV)"
+                    if test_auprc is None
+                    else round(float(test_auprc), 3)
+                ),
+            },
+        ]
     )
-    perf_df = pd.DataFrame(perf_rows)
     drift_summary_df = pd.DataFrame(
         [
             {
@@ -758,20 +795,47 @@ def main():
         challenge_drift_ascii,
     )
 
-    print("\n" + "=" * 60)
-    print("RUNTIME")
-    print("=" * 60)
-    print_table(runtime_df)
+    print("\n" + "=" * 70)
+    print("DATA DRIFT DETECTION AND MITIGATION - TIME TAKEN")
+    print("=" * 70)
+    print_ascii_dataframe(runtime_df, wrap_map=_infer_wrap_map(runtime_df, default=24))
 
-    print("\n" + "=" * 60)
-    print("MODEL PERFORMANCE METRICS")
-    print("(AU-PRC after mitigation; final model trained on full mitigated training set.)")
-    print("=" * 60)
-    print_table(perf_df)
+    print("\n" + "=" * 70)
+    print("MODEL PERFORMANCE")
+    print("=" * 70)
+    perf_ascii = perf_df.copy()
 
-    print("\n" + "=" * 60)
+    def _fmt_auprc_cell(x: object) -> str:
+        if isinstance(x, str):
+            return x
+        return f"{float(x):.3f}"
+
+    perf_ascii["AU-PRC"] = perf_ascii["AU-PRC"].map(_fmt_auprc_cell)
+    print_ascii_dataframe(
+        perf_ascii,
+        wrap_map={"": 12, "AU-PRC": 22},
+    )
+
+    n_prev = min(PREDICTION_PREVIEW_ROWS, len(test_ids))
+    pred_preview = pd.DataFrame(
+        {
+            "CustomerID": test_ids.astype(str).iloc[:n_prev].to_numpy(),
+            "probability_score": np.round(test_proba[:n_prev], 3),
+        }
+    )
+    print("\n" + "=" * 70)
+    print(
+        f"TEST SET PREDICTED PROBABILITIES (first {n_prev} rows; full file: prediction.csv)"
+    )
+    print("=" * 70)
+    print_ascii_dataframe(
+        pred_preview,
+        wrap_map={"CustomerID": 36, "probability_score": 18},
+    )
+
+    print("\n" + "=" * 70)
     print("SAVED OUTPUT FILES (see also CSV list in main.py docstring)")
-    print("=" * 60)
+    print("=" * 70)
     print(f"  {out_dir / 'prediction.csv'}  [required submit format]")
     print(f"  {out_dir / 'model.joblib'}")
     print(f"  {out_dir / 'prediction.txt'}")
