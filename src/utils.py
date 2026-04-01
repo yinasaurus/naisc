@@ -25,6 +25,8 @@ Three-stage design (maps to challenge / report expectations):
 
 from __future__ import annotations
 
+import inspect
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -512,15 +514,23 @@ class DriftMitigator:
                 if row["severity"] not in ("medium", "high"):
                     continue
                 try:
-                    binner = KBinsDiscretizer(
-                        n_bins=10, encode="ordinal", strategy="quantile",
-                        subsample=None,
-                    )
                     med = pd.to_numeric(train_out[feature], errors="coerce").median()
                     tr_vals = pd.to_numeric(train_out[feature], errors="coerce").fillna(med).to_frame()
                     te_vals = pd.to_numeric(test_out[feature], errors="coerce").fillna(med).to_frame()
-                    train_out[f"{feature}__binned"] = binner.fit_transform(tr_vals).ravel()
-                    test_out[f"{feature}__binned"] = binner.transform(te_vals).ravel()
+                    kbd_kw: dict = {
+                        "n_bins": 10,
+                        "encode": "ordinal",
+                        "strategy": "quantile",
+                        "subsample": None,
+                    }
+                    if "quantile_method" in inspect.signature(KBinsDiscretizer.__init__).parameters:
+                        kbd_kw["quantile_method"] = "averaged_inverted_cdf"
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", FutureWarning)
+                        warnings.simplefilter("ignore", UserWarning)
+                        binner = KBinsDiscretizer(**kbd_kw)
+                        train_out[f"{feature}__binned"] = binner.fit_transform(tr_vals).ravel()
+                        test_out[f"{feature}__binned"] = binner.transform(te_vals).ravel()
                 except Exception:
                     pass
 
