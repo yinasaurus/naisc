@@ -1,3 +1,4 @@
+# NAISC Singtel 2026: use Python 3.12 (CPU-only per challenge; pin interpreter via your env).
 # Core dependencies
 numpy>=1.26.0
 pandas>=2.1.0

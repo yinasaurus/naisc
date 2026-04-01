@@ -4,6 +4,19 @@
 
 **Guarding Model Integrity in a Shifting Data World**
 
+### Official challenge source (read this spec)
+
+This solution follows the **public organiser repository** and evaluation contract:
+
+- **Docs & public data layout:** [NAISC-Singtel-2026](https://github.com/lowhonzheng-singtel/NAISC-Singtel-2026) (`public_data/`, `challenge_images/`, README).
+- **How they run your code:** `pip install -r requirements.txt` then  
+  `python ./src/main.py --train_data_filepath <train_data_filepath> --test_data_filepath <test_data_filepath>` — end-to-end, **no manual steps**.
+- **Environment:** **Python 3.12**, **CPU only**, **LightGBM 4.6.0** with fixed kwargs (`verbosity=-1`, `objective="binary"`, `is_unbalance=True`, `random_state=42`, `importance_type="gain"`). Do not change other model hyperparameters or switch model family.
+- **Console:** **Data drift detection & mitigation summary** (which columns drifted, drift type/description, mitigation applied), **runtime** (in particular time for drift detection and mitigation), **AU-PRC** on train and on test **after mitigation** (when test labels exist).
+- **Root deliverables:** `prediction.csv` (**exactly** `CustomerID`, `probability_score`), `model.joblib`, `report.pdf`, plus `src/`, `requirements.txt`, `.gitignore`, this `README.md` (team name at top). Submission: form [link in organiser README](https://forms.office.com/r/gwDZZQkTDG), then add collaborators **cecilia.lin@singtel.com**, **yiting.jin@singtel.com**, **honzheng.low@singtel.com**.
+
+Local copy of train/test may live in `dataset/` for convenience; public drop is `public_data/` in the organiser repo.
+
 ---
 
 ## 📖 What This Project Does
@@ -16,13 +29,53 @@ This is a comprehensive solution for the **NAISC Singtel 2026 Challenge** that a
 4. **Trains Model**: Trains a LightGBM model with fixed hyperparameters (as per challenge requirements)
 5. **Generates Outputs**: Creates prediction.csv and model.joblib files
 
+### Drift pipeline: detect, quantify, mitigate (implementation map)
+
+This section matches what the **code** does and what a **written report** should explain.
+
+#### 1. Detect drift — which features changed?
+
+- **Where:** `src/utils.py` — class `DriftDetector`, method `detect`.
+- **How:** For each feature (raw train vs raw test, excluding `CustomerID`, `ChurnStatus`, `Month` from the feature list used for modeling):
+  - **Numeric:** two-sample **Kolmogorov–Smirnov** test (significance level `alpha`, default `0.05`) and **PSI** on binned quantiles. **Structural** checks add **sample skewness** shift (left/right) and **IQR / span expansion** for floats.
+  - **Categorical:** **Chi-square** test on the train vs test category counts and **PSI** on category proportions. **Structural:** **unseen categories** in test (values never appearing in train).
+- **Decision:** `drift_detected` is true if the statistical tests indicate a shift **or** any structural flag is set for that feature.
+- **Global signal:** A **drift classifier** (logistic regression discriminating train rows vs test rows over all features) reports **ROC-AUC**; a high score means the two samples are easy to separate (strong overall covariate shift).
+- **Outputs:** Per-feature table `drift_table.csv`; console summary (counts, drift %, classifier AUC).
+
+#### 2. Quantify severity — low / medium / high
+
+- **Where:** `src/utils.py` — `psi_severity`, `_combined_severity`, columns in `DriftDetector.detect` output.
+- **How:** **PSI → severity bands:** `psi < 0.1` → low; `0.1 ≤ psi < 0.25` → medium; `psi ≥ 0.25` → high. If a **strong structural** issue applies (e.g. unseen levels, range expansion, marked skew shift), severity is **elevated to at least medium** so risky features are not under-labeled.
+- **Outputs:** Column `severity` in `drift_table.csv`; challenge-facing descriptions in `drift_mitigation_table.csv` / console table (via `build_challenge_drift_table` in `main.py`).
+
+#### 3. Mitigate drift — what we do about it
+
+- **Where:** `src/utils.py` — class `DriftMitigator`, method `apply`; orchestration and ablation in `src/main.py` (`evaluate_variant`, variant loop).
+- **How (in order of application in `apply`):**
+  - **Drop feature:** Remove categorical columns with **unseen test categories** (stable encoding, avoids bogus levels).
+  - **Feature scaling:** For drifted numerics when enabled: **log1p** (if non-negative) + **`RobustScaler`** fit on train, applied to train and test.
+  - **Delta features:** Optional numeric columns encoding deviation from **train median** (stability under shift).
+  - **Seasonality matching:** Optional binary feature from **`Month`**: whether the train row’s month appears in the test period (requires `train_month` / `test_month` passed from `main.py`).
+  - **Pruning:** Optional drop of **high-severity** features that are also **low importance** from a baseline LightGBM (reduces harmful drifted inputs).
+- **Selection:** `main.py` tries **ablation variants** (scaling / delta / seasonality / pruning on or off), scores each on **validation AU-PRC**, picks the best, then retrains on **full** mitigated training data for final test predictions.
+
+#### For your report (short copy-paste summary)
+
+*Detect:* We flag per-feature drift using KS + PSI for numeric data and Chi-square + PSI for categoricals, supplemented by skew, range, and unseen-level checks; a domain classifier summarizes global separability of train vs test.
+
+*Quantify:* Severity is derived primarily from PSI bands, with a floor raise when structural drift is severe.
+
+*Mitigate:* We combine dropping unstable categorical features, robust scaling (and optional deltas and seasonality features), optional pruning, and validation-driven selection of the mitigation bundle before final LightGBM training.
+
 ### Key Features
 
-- ✅ **Automatic Feature Type Detection**: Automatically identifies numeric, categorical, and binary features
-- ✅ **Multiple Statistical Tests**: Uses KS test, Mann-Whitney U, Chi-square, PSI, and Wasserstein distance
-- ✅ **Adaptive Mitigation**: Applies robust scaling, domain adaptation, and feature reweighting
-- ✅ **Challenge Compliant**: Uses LightGBM v4.6.0 with fixed hyperparameters
-- ✅ **End-to-End Pipeline**: Runs completely automated without manual intervention
+- ✅ **Numeric vs categorical tests**: KS + PSI (numeric); Chi-square + PSI (categorical), plus structural flags
+- ✅ **Drift classifier**: Logistic regression domain score (train vs test) reported as ROC-AUC
+- ✅ **Mitigation stack**: Drop unseen levels, log1p + robust scaling, delta features, seasonality bit from `Month`, importance-based pruning — ablated in `main.py`
+- ✅ **Challenge Compliant**: LightGBM v4.6.0 with fixed hyperparameters (`main.py`)
+- ✅ **End-to-end**: Single CLI run; artifacts written to project root
+- ℹ️ **`src/drift_detector/`** (alternate statistical tests) and **`app.py`** Streamlit dashboard use additional / legacy paths; the **submission pipeline** is `main.py` + `utils.py`
 
 ---
 
@@ -48,31 +101,25 @@ pip install -r requirements.txt
 
 #### Step 2: Run the solution
 
-Run from the **project root** (the folder that contains `src/` and `requirements.txt`).
+**Organisers run your code from the repository root** (same folder as `requirements.txt` and `src/`) using exactly:
 
-**Windows (PowerShell or Command Prompt):**
+```bash
+pip install -r requirements.txt
+
+python ./src/main.py --train_data_filepath <train_data_filepath> --test_data_filepath <test_data_filepath>
+```
+
+Replace `<train_data_filepath>` and `<test_data_filepath>` with the paths they supply (absolute or relative to the root). This matches the **NAISC-Singtel-2026** README interface; the script uses `argparse` with those exact flag names.
+
+**Windows (same interface, different path separators):**
 
 ```powershell
 cd path\to\naisc
-python .\src\main.py --train_data_filepath .\NAISC-Singtel-2026\public_data\train.csv --test_data_filepath .\NAISC-Singtel-2026\public_data\test.csv
+pip install -r requirements.txt
+python .\src\main.py --train_data_filepath .\dataset\train.csv --test_data_filepath .\dataset\test.csv
 ```
 
-If your files are named `train.csv` and `test.csv` in the project root:
-
-```powershell
-python .\src\main.py --train_data_filepath train.csv --test_data_filepath test.csv
-```
-
-**macOS / Linux:**
-
-```bash
-cd /path/to/naisc
-python ./src/main.py \
-  --train_data_filepath NAISC-Singtel-2026/public_data/train.csv \
-  --test_data_filepath NAISC-Singtel-2026/public_data/test.csv
-```
-
-Replace the paths with your real CSV locations. The script accepts **absolute** or **relative** paths.
+**Local shorthand:** If you omit the two flags, `main.py` falls back to `dataset/train.csv` and `dataset/test.csv` for quick runs only — **do not rely on that for the official grading command**, which will always pass both paths explicitly.
 
 #### Step 3: Check outputs
 
@@ -82,12 +129,57 @@ Replace the paths with your real CSV locations. The script accepts **absolute** 
 
 | File | What it is |
 |------|------------|
-| `drift_mitigation_table.csv` | Four-column drift table (same content as the printed challenge table) |
+| `drift_detection_summary.csv` | One-row headline: drift counts, domain AUC, chosen variant, validation AU-PRC (mirrors early console summary) |
+| `drift_mitigation_table.csv` | Four-column drift table (same as printed challenge table) |
 | `drift_mitigation_table.txt` | Same table as plain-text ASCII |
-| `drift_table.csv` | Full drift metrics per feature (p-values, PSI, flags, etc.) |
-| `ablation_results.csv` | Validation AU-PRC for each mitigation variant |
-| `prediction.csv` | Test predictions: `CustomerID`, `probability_score` |
+| `drift_table.csv` | Full drift metrics per feature (p-values, PSI, flags; **CSV only**, not printed) |
+| `ablation_results.csv` | Validation AU-PRC for each mitigation variant (same as console grid) |
+| `runtime_summary.csv` | Drift+mitigation timing and total runtime (same as console RUNTIME table) |
+| `model_performance.csv` | Train / test AU-PRC rows (same as console MODEL PERFORMANCE table) |
+| `prediction.csv` | Test predictions: `CustomerID`, `probability_score` (comma-separated) |
+| `prediction.txt` | Same predictions as UTF-8 **tab-separated** text (one row per line, header row) |
 | `model.joblib` | Trained LightGBM model |
+
+#### `drift_detection_summary.csv` (one row per run)
+
+Headline metrics written alongside the console drift summary. Columns:
+
+| Column | Meaning |
+|--------|---------|
+| `total_features` | Number of modelling features compared (train vs test) |
+| `features_with_drift` | Count where drift was flagged |
+| `drift_percentage` | Share of features with drift (%) |
+| `drift_classifier_auc` | ROC-AUC of a logistic model separating train vs test rows (global shift) |
+| `selected_mitigation_variant` | Ablation branch chosen by validation AU-PRC (e.g. `baseline`, `full_policy`) |
+| `validation_auprc_baseline` | Validation AU-PRC for the baseline mitigation settings |
+| `validation_auprc_best` | Validation AU-PRC for the selected variant |
+| `dropped_or_pruned_features` | Semicolon-separated feature names dropped (unseen categories and/or pruning); empty if none |
+
+Example row shape:
+
+```csv
+total_features,features_with_drift,drift_percentage,drift_classifier_auc,selected_mitigation_variant,validation_auprc_baseline,validation_auprc_best,dropped_or_pruned_features
+42,13,30.9524,0.917105,baseline,0.846923,0.846923,Contract
+```
+
+*(Numbers depend on your data run.)*
+
+### Runtime budget (≈10 minutes, CPU)
+
+Evaluation expects **drift detection + mitigation** to finish in about **10 minutes** on large hidden data (millions of rows). The pipeline therefore **caps the heaviest steps** while keeping behaviour principled:
+
+| Mechanism | Where | What it does |
+|-----------|--------|----------------|
+| Subsampled **KS / PSI / Cohen *d*** | `utils.DriftDetector` | Up to **100k** points per side per feature for numeric two-sample stats (unbiased random subsample, `random_state` chain from 42). |
+| Subsampled **skew / range** checks | same | Same cap for shape-only statistics. |
+| Subsampled **domain classifier** | `DriftDetector._drift_classifier_auc` | At most **150k** train and **150k** test rows for the logistic “train vs test” AUC (separate RNG seed 999). |
+| Full **categorical** tables | same | **Unseen categories** and **Chi² / PSI** still use **all** rows so level coverage is correct. |
+| Subsampled **ablation fits** | `main.py` | If the train split exceeds **350k** rows, LightGBM fits inside the ablation loop use a **stratified** subset of that size (`random_state=45`). Validation scoring similarly capped at **120k** rows (`random_state=46`). If **all training rows** exceed **800k**, caps drop to **200k** / **80k** (`SCALABILITY_TIGHT_ROW_THRESHOLD` and `*_TIGHT` constants). |
+| Subsampled **importance** for pruning | `main.py` | If the train split exceeds **300k** rows, the baseline importance model is fit on a **stratified** subset (`random_state=44`). Same **800k** tier tightens the importance cap to **150k**. |
+| **Fewer ablation variants** | `main.py` | If **all training rows** ≥ **400k**, only **6** mitigation bundles are evaluated (`_ablation_variants` fast path) instead of **9**, because each variant runs full mitigation over the whole train/test frame. |
+| **Tighter drift subsamples** | `main.py` + `DriftDetector` | If training rows ≥ **1.2M**, numeric stat / skew caps and the domain-classifier row cap are lowered (**80k** / **80k** / **100k** per side) before `detect`. |
+
+The **final** model is still trained on the **full** mitigated training matrix once a variant is chosen. Tune the module-level constants in `main.py` (`IMPORTANCE_FIT_MAX_ROWS`, `ABLATION_FULL_VARIANT_ROW_THRESHOLD`, …) and `DriftDetector` fields if you need stricter caps.
 
 ---
 
@@ -410,19 +502,17 @@ pip install lightgbm==4.6.0
 
 ## 📝 Testing Your Solution
 
-### Test with Public Data
+### Test with bundled data
 
 ```bash
-# Make sure you have the public datasets
-python ./src/main.py \
-  --train_data_filepath NAISC-Singtel-2026/public_data/train.csv \
-  --test_data_filepath NAISC-Singtel-2026/public_data/test.csv
+# Uses dataset/train.csv and dataset/test.csv by default
+python ./src/main.py
 ```
 
 ### Verify Outputs
 
 1. Check console output has all required sections
-2. Verify `prediction.csv` exists and has correct format
+2. Verify `prediction.csv` (and optional `prediction.txt`) exist and have correct format
 3. Verify `model.joblib` exists
 4. Check AU-PRC values are reasonable
 
@@ -523,7 +613,7 @@ Before submitting, make sure:
 - [ ] Console output includes all required sections
 - [ ] Repository structure matches requirements
 - [ ] `requirements.txt` includes all dependencies
-- [ ] `.gitignore` excludes __pycache__ and CSVs (except prediction.csv)
+- [ ] `.gitignore` excludes `__pycache__` and stray CSVs; `prediction.csv` and `model.joblib` can be committed for grading
 - [ ] Report.pdf is created and documents your approach
 - [ ] All files are pushed to main branch
 - [ ] Microsoft form is submitted before deadline (12PM, 17 April 2026 SGT)
@@ -576,10 +666,10 @@ Your repo must have this exact structure:
 │   ├── drift_detector/     # Optional legacy/experimental module
 │   ├── mitigation/         # Optional legacy/experimental module
 │   └── visualization/      # Visualization (optional)
-├── notebooks/              # (Optional) Jupyter notebooks
-│   └── xxx.ipynb
-├── prediction.csv         # REQUIRED: Predictions on public test set
-├── model.joblib           # REQUIRED: Trained model on public train set
+├── dataset/                # Optional: bundled train.csv / test.csv (or use organiser public_data/)
+├── notebooks/              # (Optional) Jupyter per organiser layout; see .gitkeep
+├── prediction.csv          # REQUIRED after run: CustomerID, probability_score (tracked)
+├── model.joblib            # REQUIRED after run: trained model (tracked)
 ├── report.pdf             # REQUIRED: PDF report of solution
 ├── .gitignore             # REQUIRED: Exclude __pycache__ and CSVs
 ├── requirements.txt       # REQUIRED: List of dependencies
@@ -594,7 +684,7 @@ Your repo must have this exact structure:
 - ✅ `report.pdf` - Solution documentation
 - ✅ `requirements.txt` - Dependencies
 - ✅ `README.md` - With team name at top
-- ✅ `.gitignore` - Excludes __pycache__ and CSVs (except prediction.csv)
+- ✅ `.gitignore` - Excludes `__pycache__`, extra CSVs; **allows** `dataset/*.csv`, `prediction.csv`, and `model.joblib` per organiser layout
 
 ### Evaluation Criteria
 

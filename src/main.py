@@ -1,6 +1,24 @@
-"""Main entry point for NAISC Singtel 2026 challenge pipeline."""
+"""
+NAISC Singtel 2026 challenge pipeline — `src/main.py`.
+
+End-to-end flow (see `utils.py` module docstring for algorithm detail):
+
+1. **Detect** — `DriftDetector.detect` on raw train/test feature columns → `drift_table`
+   (per-feature `drift_detected`, tests, PSI, structural flags) + drift-classifier AUC.
+2. **Quantify** — Each row includes `severity` (`low` / `medium` / `high`); exported in
+   `drift_table.csv` and summarized in the printed / CSV challenge drift table via
+   `build_challenge_drift_table`.
+3. **Mitigate** — `DriftMitigator.apply` runs several strategies (toggleable); this
+   script evaluates ablations on a time-based or stratified validation split, selects
+   the winning variant by AU-PRC, fits final LightGBM on full training data, and writes
+   `prediction.csv`, `prediction.txt`, `model.joblib`, plus CSV/text artifacts:
+   `drift_detection_summary.csv`, `drift_table.csv`, `drift_mitigation_table.csv`,
+   `drift_mitigation_table.txt`, `ablation_results.csv`, `runtime_summary.csv`,
+   `model_performance.csv`.
+"""
 
 import argparse
+import io
 import textwrap
 import time
 from pathlib import Path
@@ -13,7 +31,71 @@ from sklearn.metrics import average_precision_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from utils import DriftDetector, DriftMitigator
+from utils import DriftDetector, DriftMitigator, _skew_direction_label
+
+# Keep drift + ablation passes bounded on multi-million-row CPU runs (~10 min organiser budget).
+IMPORTANCE_FIT_MAX_ROWS = 300_000
+ABLATION_FIT_MAX_ROWS = 350_000
+ABLATION_VAL_MAX_ROWS = 120_000
+SCALABILITY_LOG_MIN_ROWS = 200_000
+# Each ablation runs full mitigation on all train/test rows then a LightGBM fit — dominant cost at huge n.
+ABLATION_FULL_VARIANT_ROW_THRESHOLD = 400_000
+SCALABILITY_TIGHT_ROW_THRESHOLD = 800_000
+IMPORTANCE_FIT_MAX_ROWS_TIGHT = 150_000
+ABLATION_FIT_MAX_ROWS_TIGHT = 200_000
+ABLATION_VAL_MAX_ROWS_TIGHT = 80_000
+# DriftDetector already subsamples heavy stats; tighten further only for very large frames.
+DETECTOR_TIGHT_ROW_THRESHOLD = 1_200_000
+
+
+def _subsample_index_stratified(idx: np.ndarray, y_aligned: pd.Series, max_n: int, random_state: int) -> np.ndarray:
+    if len(idx) <= max_n:
+        return idx
+    y_sub = y_aligned.reindex(idx)
+    sub, _ = train_test_split(idx, train_size=max_n, stratify=y_sub, random_state=random_state)
+    return np.sort(sub)
+
+
+def _ablation_variants(n_train_rows: int) -> Dict[str, dict]:
+    """Full grid on typical/public scale; fewer variants when train is huge (mitigation is O(variants×n))."""
+    full: Dict[str, dict] = {
+        "baseline": {},
+        "scaling_only": dict(use_scaling=True),
+        "scaling+delta": dict(use_scaling=True, use_delta=True),
+        "scaling+delta+binning": dict(use_scaling=True, use_delta=True, use_binning=True),
+        "scaling+realignment": dict(use_scaling=True, use_realignment=True),
+        "sliding_window": dict(use_scaling=True, use_delta=True, use_sliding_window=True),
+        "weighted_decay": dict(use_scaling=True, use_delta=True, use_weighted_decay=True),
+        "full_policy": dict(
+            use_scaling=True,
+            use_delta=True,
+            use_seasonality=True,
+            use_pruning=True,
+        ),
+        "full+binning+realign": dict(
+            use_scaling=True,
+            use_delta=True,
+            use_seasonality=True,
+            use_pruning=True,
+            use_binning=True,
+            use_realignment=True,
+        ),
+    }
+    if n_train_rows >= ABLATION_FULL_VARIANT_ROW_THRESHOLD:
+        return {
+            "baseline": {},
+            "scaling_only": dict(use_scaling=True),
+            "scaling+delta": dict(use_scaling=True, use_delta=True),
+            "scaling+realignment": dict(use_scaling=True, use_realignment=True),
+            "weighted_decay": dict(use_scaling=True, use_delta=True, use_weighted_decay=True),
+            "full_policy": dict(
+                use_scaling=True,
+                use_delta=True,
+                use_seasonality=True,
+                use_pruning=True,
+            ),
+        }
+    return full
 
 
 LIGHTGBM_PARAMS = {
@@ -124,6 +206,15 @@ def build_validation_split(
     return x_tr, y_tr, x_val, y_val
 
 
+def train_lightgbm_weighted(x_train: pd.DataFrame, y_train: pd.Series, sample_weight: np.ndarray | None = None):
+    import lightgbm as lgb
+    if LIGHTGBM_PARAMS != REQUIRED_LIGHTGBM_PARAMS:
+        raise ValueError("LightGBM parameters must exactly match challenge requirements.")
+    model = lgb.LGBMClassifier(**LIGHTGBM_PARAMS)
+    model.fit(x_train, y_train, sample_weight=sample_weight)
+    return model
+
+
 def get_feature_importance(model, columns: List[str]) -> Dict[str, float]:
     if hasattr(model, "feature_importances_"):
         return {c: float(v) for c, v in zip(columns, model.feature_importances_)}
@@ -153,7 +244,44 @@ TEXT_NEW_LEVELS = (
 TEXT_LEFT_SKEW = (
     "Feature demonstrates greater left-skewness in test set compared to training set."
 )
+TEXT_RIGHT_SKEW = (
+    "Feature demonstrates greater right-skewness in test set compared to training set."
+)
 TEXT_RANGE_EXPLODE = "Feature ranges explode in test set."
+
+
+def _skew_tail_sentence(row: pd.Series) -> str:
+    """Append sample skewness (train vs test) and left/right shift wording for numeric features."""
+    if str(row.get("feature_type")) != "numerical":
+        return ""
+    raw_tr = row.get("train_skewness")
+    raw_te = row.get("test_skewness")
+    try:
+        s_tr = float(raw_tr)
+        s_te = float(raw_te)
+    except (TypeError, ValueError):
+        return ""
+    if np.isnan(s_tr) or np.isnan(s_te):
+        return ""
+    lbl_tr = _skew_direction_label(s_tr)
+    lbl_te = _skew_direction_label(s_te)
+    out = (
+        f" Train sample skewness ~{s_tr:.3f} ({lbl_tr}); "
+        f"test ~{s_te:.3f} ({lbl_te})."
+    )
+    if s_te < s_tr - 0.2:
+        out += (
+            " Shape drift: test skewness is lower than train "
+            "(distribution relatively less right-heavy or more left-heavy vs train)."
+        )
+    elif s_te > s_tr + 0.2:
+        out += (
+            " Shape drift: test skewness is higher than train "
+            "(distribution relatively more right-heavy or less left-heavy vs train)."
+        )
+    else:
+        out += " Skewness is broadly comparable between train and test."
+    return out
 
 
 def _challenge_drift_description(row: pd.Series, raw_dtype_map: Dict[str, str]) -> str:
@@ -167,15 +295,30 @@ def _challenge_drift_description(row: pd.Series, raw_dtype_map: Dict[str, str]) 
         and ctype == "Int"
         and _row_flag(row, "skew_left_stronger_in_test")
     ):
-        return TEXT_LEFT_SKEW
-    if row["feature_type"] == "numerical" and ctype == "Float":
-        return TEXT_RANGE_EXPLODE
+        return TEXT_LEFT_SKEW + _skew_tail_sentence(row)
+    if (
+        row["feature_type"] == "numerical"
+        and ctype == "Int"
+        and _row_flag(row, "skew_right_stronger_in_test")
+    ):
+        return TEXT_RIGHT_SKEW + _skew_tail_sentence(row)
+    if (
+        row["feature_type"] == "numerical"
+        and ctype == "Float"
+        and _row_flag(row, "range_expansion")
+    ):
+        return TEXT_RANGE_EXPLODE + _skew_tail_sentence(row)
+
+    eff = row.get("effect_size")
+    eff_str = ""
+    if eff is not None and not (isinstance(eff, float) and np.isnan(eff)):
+        eff_str = f" Effect size: {float(eff):.3f}."
 
     if row["feature_type"] == "categorical":
-        return "Categorical distribution differs between training and test sets."
+        return f"Categorical distribution differs between training and test sets.{eff_str}"
     if row["feature_type"] == "numerical":
-        return "Numeric distribution differs between training and test sets."
-    return "Distribution differs between training and test sets."
+        return f"Numeric distribution differs between training and test sets.{eff_str}" + _skew_tail_sentence(row)
+    return f"Distribution differs between training and test sets.{eff_str}"
 
 
 def _challenge_drift_mitigation(
@@ -189,7 +332,10 @@ def _challenge_drift_mitigation(
     if (
         row["feature_type"] == "numerical"
         and ctype == "Int"
-        and _row_flag(row, "skew_left_stronger_in_test")
+        and (
+            _row_flag(row, "skew_left_stronger_in_test")
+            or _row_flag(row, "skew_right_stronger_in_test")
+        )
     ):
         return "Seasonality Matching"
     if row["feature_type"] == "numerical" and ctype == "Float":
@@ -205,6 +351,10 @@ def _friendly_mitigation_name(value: str) -> str:
         "drop_unseen_categories": "Drop Feature",
         "categorical_monitoring": "Category Monitoring",
         "seasonality_matching": "Seasonality Matching",
+        "binning": "Binning / Discretization",
+        "input_realignment": "Input Re-Alignment",
+        "weighted_decay": "Weighted Decay",
+        "sliding_window": "Sliding Window",
         "none": "None",
     }
     return mapping.get(value, value.replace("_", " ").title())
@@ -281,9 +431,38 @@ def print_table(df: pd.DataFrame, title: str | None = None) -> None:
 
 
 def save_outputs(model, test_ids: pd.Series, test_proba: np.ndarray, output_dir: Path = Path(".")) -> None:
+    """Binary + prediction deliverables (organisers: prediction.csv in repo root)."""
     joblib.dump(model, output_dir / "model.joblib")
     pred_df = pd.DataFrame({"CustomerID": test_ids, "probability_score": test_proba})
     pred_df.to_csv(output_dir / "prediction.csv", index=False)
+    buf = io.StringIO()
+    pred_df.to_csv(buf, index=False, sep="\t", lineterminator="\n")
+    (output_dir / "prediction.txt").write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+
+
+def write_csv_reports(
+    output_dir: Path,
+    drift_summary_df: pd.DataFrame,
+    ablation_df: pd.DataFrame,
+    drift_table: pd.DataFrame,
+    challenge_drift_df: pd.DataFrame,
+    runtime_df: pd.DataFrame,
+    perf_df: pd.DataFrame,
+    challenge_drift_ascii: str,
+) -> None:
+    """
+    All tabular run outputs as CSV/text on disk (do not duplicate prediction rows here).
+
+    Mirrors console tables: drift headline stats, ablation, runtime, performance, and the
+    challenge drift column table. Full per-feature metrics only on disk (drift_table.csv).
+    """
+    drift_summary_df.to_csv(output_dir / "drift_detection_summary.csv", index=False)
+    ablation_df.to_csv(output_dir / "ablation_results.csv", index=False)
+    drift_table.to_csv(output_dir / "drift_table.csv", index=False)
+    challenge_drift_df.to_csv(output_dir / "drift_mitigation_table.csv", index=False)
+    runtime_df.to_csv(output_dir / "runtime_summary.csv", index=False)
+    perf_df.to_csv(output_dir / "model_performance.csv", index=False)
+    (output_dir / "drift_mitigation_table.txt").write_text(challenge_drift_ascii, encoding="utf-8")
 
 
 def evaluate_variant(
@@ -298,15 +477,20 @@ def evaluate_variant(
     y_tr: pd.Series,
     x_val: pd.DataFrame,
     y_val: pd.Series,
-    use_scaling: bool,
-    use_delta: bool,
-    use_seasonality: bool,
-    use_pruning: bool,
-) -> Tuple[float, pd.DataFrame, pd.DataFrame, Dict[str, str], List[str]]:
+    y_train: pd.Series,
+    use_scaling: bool = False,
+    use_delta: bool = False,
+    use_seasonality: bool = False,
+    use_pruning: bool = False,
+    use_binning: bool = False,
+    use_realignment: bool = False,
+    use_sliding_window: bool = False,
+    use_weighted_decay: bool = False,
+) -> Tuple[float, pd.DataFrame, pd.DataFrame, Dict[str, str], List[str], np.ndarray | None]:
     train_month = train_df["Month"] if "Month" in train_df.columns else None
     test_month = test_df["Month"] if "Month" in test_df.columns else None
     mitigator = DriftMitigator()
-    x_train_v, x_test_v, mitigation_map_v, dropped_v = mitigator.apply(
+    x_train_v, x_test_v, mitigation_map_v, dropped_v, sample_weights = mitigator.apply(
         x_train,
         x_test,
         drift_table,
@@ -315,28 +499,64 @@ def evaluate_variant(
         apply_delta_features=use_delta,
         apply_seasonality=use_seasonality,
         apply_pruning=use_pruning,
+        apply_binning=use_binning,
+        apply_realignment=use_realignment,
+        apply_sliding_window=use_sliding_window,
+        apply_weighted_decay=use_weighted_decay,
         train_month=train_month,
         test_month=test_month,
+        y_train=y_train,
     )
-    model_v = train_lightgbm(x_train_v.loc[x_tr.index], y_tr)
-    val_proba_v = model_v.predict_proba(x_train_v.loc[x_val.index])[:, 1]
-    val_auprc_v = average_precision_score(y_val, val_proba_v)
-    return val_auprc_v, x_train_v, x_test_v, mitigation_map_v, dropped_v
+    tr_idx = x_tr.index.intersection(x_train_v.index)
+    val_idx = x_val.index.intersection(x_train_v.index)
+    if len(tr_idx) < 100 or len(val_idx) < 50:
+        return 0.0, x_train_v, x_test_v, mitigation_map_v, dropped_v, sample_weights
+
+    sw = None
+    if sample_weights is not None:
+        sw_series = pd.Series(sample_weights, index=x_train_v.index)
+        sw = sw_series.loc[tr_idx].to_numpy()
+
+    model_v = train_lightgbm_weighted(x_train_v.loc[tr_idx], y_train.loc[tr_idx], sw)
+    val_proba_v = model_v.predict_proba(x_train_v.loc[val_idx])[:, 1]
+    val_auprc_v = average_precision_score(y_train.loc[val_idx], val_proba_v)
+    return val_auprc_v, x_train_v, x_test_v, mitigation_map_v, dropped_v, sample_weights
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NAISC Singtel 2026 challenge pipeline")
+    """See module docstring at top of file for LightGBM params and pipeline stages.
+
+    Console vs disk:
+    - **Stdout:** progress lines, drift summary stats, mitigation selection, ASCII drift table,
+      ablation grid, runtime table, AU-PRC table, file path list (no raw prediction dump).
+    - **Disk:** all structured tables also written as CSV (and prediction.txt) via
+      ``write_csv_reports`` + ``save_outputs``.
+    """
+    parser = argparse.ArgumentParser(
+        description="NAISC Singtel 2026 challenge pipeline",
+        epilog=(
+            "Official run (from repo root): "
+            "python ./src/main.py --train_data_filepath <train_data_filepath> "
+            "--test_data_filepath <test_data_filepath>"
+        ),
+    )
     parser.add_argument(
         "--train_data_filepath",
         type=str,
-        default="NAISC-Singtel-2026/public_data/train.csv",
-        help="Path to training CSV (default: public_data/train.csv)",
+        default="dataset/train.csv",
+        help=(
+            "Path to training CSV (organisers always pass this explicitly; "
+            "default dataset/train.csv is for local dev only)"
+        ),
     )
     parser.add_argument(
         "--test_data_filepath",
         type=str,
-        default="NAISC-Singtel-2026/public_data/test.csv",
-        help="Path to test CSV (default: public_data/test.csv)",
+        default="dataset/test.csv",
+        help=(
+            "Path to test CSV (organisers always pass this explicitly; "
+            "default dataset/test.csv is for local dev only)"
+        ),
     )
     args = parser.parse_args()
 
@@ -347,27 +567,75 @@ def main():
     raw_dtype_map = {col: str(train_df[col].dtype) for col in features if col in train_df.columns}
 
     x_tr, y_tr, x_val, y_val = build_validation_split(train_df, x_train, y_train)
-    baseline_model = train_lightgbm(x_tr, y_tr)
-    importance = get_feature_importance(baseline_model, list(x_tr.columns))
+
+    scalability_notes: List[str] = []
+    n_train_all = len(train_df)
+    imp_cap = IMPORTANCE_FIT_MAX_ROWS
+    abl_cap = ABLATION_FIT_MAX_ROWS
+    val_cap = ABLATION_VAL_MAX_ROWS
+    if n_train_all >= SCALABILITY_TIGHT_ROW_THRESHOLD:
+        imp_cap = IMPORTANCE_FIT_MAX_ROWS_TIGHT
+        abl_cap = ABLATION_FIT_MAX_ROWS_TIGHT
+        val_cap = ABLATION_VAL_MAX_ROWS_TIGHT
+        scalability_notes.append("tight_importance_ablation_caps")
+    if n_train_all >= ABLATION_FULL_VARIANT_ROW_THRESHOLD:
+        scalability_notes.append("reduced_ablation_variants")
+    if n_train_all >= DETECTOR_TIGHT_ROW_THRESHOLD:
+        scalability_notes.append("drift_detector_tight_caps")
+
+    if len(x_tr) > imp_cap:
+        idx_imp = _subsample_index_stratified(x_tr.index.to_numpy(), y_tr, imp_cap, 44)
+        importance_model = train_lightgbm(x_tr.loc[idx_imp], y_tr.loc[idx_imp])
+        importance = get_feature_importance(importance_model, list(x_tr.columns))
+        scalability_notes.append(f"feature_importance_fit_rows={len(idx_imp)}")
+    else:
+        _importance_model = train_lightgbm(x_tr, y_tr)
+        importance = get_feature_importance(_importance_model, list(x_tr.columns))
+
+    if len(x_tr) > abl_cap:
+        idx_ab = _subsample_index_stratified(x_tr.index.to_numpy(), y_train, abl_cap, 45)
+        x_tr_ab, y_tr_ab = x_tr.loc[idx_ab], y_tr.loc[idx_ab]
+        scalability_notes.append(f"ablation_train_fit_rows={len(idx_ab)}")
+    else:
+        x_tr_ab, y_tr_ab = x_tr, y_tr
+
+    if len(x_val) > val_cap:
+        idx_va = _subsample_index_stratified(x_val.index.to_numpy(), y_val, val_cap, 46)
+        x_val_ab, y_val_ab = x_val.loc[idx_va], y_val.loc[idx_va]
+        scalability_notes.append(f"ablation_val_rows={len(idx_va)}")
+    else:
+        x_val_ab, y_val_ab = x_val, y_val
 
     print("\n" + "=" * 60)
-    print("DATA DRIFT DETECTION & MITIGATION")
+    print("DATA DRIFT DETECTION & MITIGATION SUMMARY")
+    print("(Per organisers: drift findings, mitigation choices, runtime, AU-PRC.)")
     print("=" * 60)
+    if len(train_df) >= SCALABILITY_LOG_MIN_ROWS or scalability_notes:
+        extra = "; ".join(scalability_notes) if scalability_notes else "detector subsampling only"
+        print(
+            f"[Scalability] Large data path active (train n={len(train_df)}). "
+            f"Caps reduce worst-case CPU time; {extra}. See README."
+        )
     drift_start = time.time()
 
+    print("\n[1/3] Detecting data drift (train vs test, per feature)...")
     detector = DriftDetector(alpha=0.05, psi_threshold=0.1)
+    if n_train_all >= DETECTOR_TIGHT_ROW_THRESHOLD:
+        detector.max_rows_per_split_stat_tests = 80_000
+        detector.max_rows_skew_and_range = 80_000
+        detector.max_rows_domain_classifier_per_split = 100_000
     drift_table, drift_info = detector.detect(x_train_raw, x_test_raw, features)
-    variants = [
-        ("baseline", False, False, False, False),
-        ("scaling_only", True, False, False, False),
-        ("scaling_plus_delta", True, True, False, False),
-        ("full_policy", True, True, True, True),
-    ]
+    print("[2/3] Drift detection summary:")
+    print(f"  - Columns with detected drift: {drift_info['features_with_drift']} / {drift_info['total_features']}")
+    print(f"  - Drift percentage: {drift_info['drift_percentage']:.2f}%")
+    print(f"  - Global drift classifier AUC (train vs test domain): {drift_info['drift_classifier_auc']:.6f}")
+    print("\n[3/3] Applying mitigation strategies (ablation + selected pipeline)...")
+    variants = _ablation_variants(n_train_all)
 
     ablation_rows = []
     variant_store = {}
-    for name, use_scaling, use_delta, use_seasonality, use_pruning in variants:
-        val_score, x_train_v, x_test_v, mitigation_map_v, dropped_v = evaluate_variant(
+    for name, kwargs in variants.items():
+        val_score, x_train_v, x_test_v, mitigation_map_v, dropped_v, sw_v = evaluate_variant(
             name,
             train_df,
             test_df,
@@ -375,40 +643,28 @@ def main():
             importance,
             x_train,
             x_test,
-            x_tr,
-            y_tr,
-            x_val,
-            y_val,
-            use_scaling,
-            use_delta,
-            use_seasonality,
-            use_pruning,
+            x_tr_ab,
+            y_tr_ab,
+            x_val_ab,
+            y_val_ab,
+            y_train,
+            **kwargs,
         )
         ablation_rows.append(
             {
                 "variant": name,
                 "val_auprc": float(val_score),
-                "use_scaling": use_scaling,
-                "use_delta": use_delta,
-                "use_seasonality": use_seasonality,
-                "use_pruning": use_pruning,
+                "strategies": ", ".join(k.replace("use_", "") for k, v in kwargs.items() if v) or "none",
                 "pruned_features_count": len(dropped_v),
             }
         )
-        variant_store[name] = (x_train_v, x_test_v, mitigation_map_v, dropped_v)
+        variant_store[name] = (x_train_v, x_test_v, mitigation_map_v, dropped_v, sw_v)
 
     ablation_df = pd.DataFrame(ablation_rows).sort_values("val_auprc", ascending=False)
     best_variant = ablation_df.iloc[0]["variant"]
-    x_train_m, x_test_m, mitigation_map, dropped = variant_store[best_variant]
+    x_train_m, x_test_m, mitigation_map, dropped, best_sw = variant_store[best_variant]
 
     drift_elapsed = time.time() - drift_start
-    print("\n[1/3] Detecting data drift...")
-    print("[2/3] Drift Detection Summary:")
-    print(f"  - Total features analyzed: {drift_info['total_features']}")
-    print(f"  - Features with detected drift: {drift_info['features_with_drift']}")
-    print(f"  - Drift percentage: {drift_info['drift_percentage']:.2f}%")
-    print(f"  - Drift classifier AUC: {drift_info['drift_classifier_auc']:.6f}")
-    print("\n[3/3] Applying mitigation strategies...")
     base_val_auprc = float(ablation_df.loc[ablation_df["variant"] == "baseline", "val_auprc"].iloc[0])
     best_val_auprc = float(ablation_df.iloc[0]["val_auprc"])
     print(f"  - Validation AU-PRC (baseline): {base_val_auprc:.6f}")
@@ -417,24 +673,28 @@ def main():
     if dropped:
         print(f"  - Pruned features: {', '.join(dropped)}")
     challenge_drift_df = build_challenge_drift_table(drift_table, mitigation_map, raw_dtype_map)
-    print("\nColumns with Drift (Challenge-style Table)")
-    print(
-        _ascii_table(
-            challenge_drift_df,
-            wrap_map={
-                "Columns with Drift": 24,
-                "Column Type": 12,
-                "Drift Description": 60,
-                "Drift Mitigation": 24,
-            },
-        )
+    challenge_drift_ascii = _ascii_table(
+        challenge_drift_df,
+        wrap_map={
+            "Columns with Drift": 24,
+            "Column Type": 12,
+            "Drift Description": 60,
+            "Drift Mitigation": 24,
+        },
     )
+    print("\nColumns with detected drift | Column type | Drift description | Mitigation applied")
+    print(challenge_drift_ascii)
     print_table(ablation_df, title="Ablation summary (validation AU-PRC)")
 
     final_x_train = x_train_m
     final_x_test = x_test_m
 
-    model = train_lightgbm(final_x_train, y_train)
+    final_sw = None
+    if best_sw is not None:
+        sw_series = pd.Series(best_sw, index=x_train_m.index)
+        valid_idx = final_x_train.index.intersection(sw_series.index)
+        final_sw = sw_series.loc[valid_idx].to_numpy() if len(valid_idx) == len(final_x_train) else None
+    model = train_lightgbm_weighted(final_x_train, y_train, final_sw)
     train_proba = model.predict_proba(final_x_train)[:, 1]
     test_proba = model.predict_proba(final_x_test)[:, 1]
     train_auprc = average_precision_score(y_train, train_proba)
@@ -451,54 +711,77 @@ def main():
     save_outputs(model, test_ids, test_proba)
 
     total_elapsed = time.time() - total_start
-    print("\n" + "=" * 60)
-    print("RUNTIME")
-    print("=" * 60)
     runtime_df = pd.DataFrame(
         [
-            {"metric": "Time taken for drift detection and mitigation (s)", "value": round(drift_elapsed, 2)},
-            {"metric": "Total runtime (s)", "value": round(total_elapsed, 2)},
+            {
+                "metric": "Time taken for drift detection and mitigation (s)",
+                "value": round(drift_elapsed, 2),
+            },
+            {"metric": "Total end-to-end runtime (s)", "value": round(total_elapsed, 2)},
         ]
     )
-    print_table(runtime_df)
-
-    print("\n" + "=" * 60)
-    print("MODEL PERFORMANCE METRICS")
-    print("=" * 60)
-    perf_rows = [{"dataset": "Train Set", "AU-PRC": round(float(train_auprc), 6)}]
+    perf_rows = [
+        {"dataset": "Train Set (mitigated features, full train)", "AU-PRC": round(float(train_auprc), 6)}
+    ]
     perf_rows.append(
         {
-            "dataset": "Test Set",
+            "dataset": "Test Set (mitigated features; need labels in test CSV)",
             "AU-PRC": "N/A (test labels not available)"
             if test_auprc is None
             else round(float(test_auprc), 6),
         }
     )
     perf_df = pd.DataFrame(perf_rows)
+    drift_summary_df = pd.DataFrame(
+        [
+            {
+                "total_features": drift_info["total_features"],
+                "features_with_drift": drift_info["features_with_drift"],
+                "drift_percentage": round(float(drift_info["drift_percentage"]), 4),
+                "drift_classifier_auc": round(float(drift_info["drift_classifier_auc"]), 6),
+                "selected_mitigation_variant": best_variant,
+                "validation_auprc_baseline": round(float(base_val_auprc), 6),
+                "validation_auprc_best": round(float(best_val_auprc), 6),
+                "dropped_or_pruned_features": ";".join(dropped) if dropped else "",
+            }
+        ]
+    )
+    out_dir = Path(".").resolve()
+    write_csv_reports(
+        out_dir,
+        drift_summary_df,
+        ablation_df,
+        drift_table,
+        challenge_drift_df,
+        runtime_df,
+        perf_df,
+        challenge_drift_ascii,
+    )
+
+    print("\n" + "=" * 60)
+    print("RUNTIME")
+    print("=" * 60)
+    print_table(runtime_df)
+
+    print("\n" + "=" * 60)
+    print("MODEL PERFORMANCE METRICS")
+    print("(AU-PRC after mitigation; final model trained on full mitigated training set.)")
+    print("=" * 60)
     print_table(perf_df)
 
-    out_dir = Path(".").resolve()
-    ablation_df.to_csv("ablation_results.csv", index=False)
-    drift_table.to_csv("drift_table.csv", index=False)
-    challenge_drift_df.to_csv("drift_mitigation_table.csv", index=False)
     print("\n" + "=" * 60)
-    print("DRIFT OUTPUT FILES (challenge-format table)")
+    print("SAVED OUTPUT FILES (see also CSV list in main.py docstring)")
     print("=" * 60)
+    print(f"  {out_dir / 'prediction.csv'}  [required submit format]")
+    print(f"  {out_dir / 'model.joblib'}")
+    print(f"  {out_dir / 'prediction.txt'}")
     print(f"  {out_dir / 'drift_mitigation_table.csv'}")
-    print(f"  {out_dir / 'drift_mitigation_table.txt'}  (same table, ASCII)")
-    print(f"  {out_dir / 'drift_table.csv'}  (full metrics: p-value, PSI, flags, etc.)")
-    Path("drift_mitigation_table.txt").write_text(
-        _ascii_table(
-            challenge_drift_df,
-            wrap_map={
-                "Columns with Drift": 24,
-                "Column Type": 12,
-                "Drift Description": 60,
-                "Drift Mitigation": 24,
-            },
-        ),
-        encoding="utf-8",
-    )
+    print(f"  {out_dir / 'drift_mitigation_table.txt'}")
+    print(f"  {out_dir / 'drift_detection_summary.csv'}")
+    print(f"  {out_dir / 'drift_table.csv'}")
+    print(f"  {out_dir / 'ablation_results.csv'}")
+    print(f"  {out_dir / 'runtime_summary.csv'}")
+    print(f"  {out_dir / 'model_performance.csv'}")
 
 
 if __name__ == "__main__":
