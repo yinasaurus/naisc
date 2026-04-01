@@ -1,6 +1,6 @@
 # 🛡️ Adaptive Drift Intelligence Challenge
 
-**Team Name:** [YOUR_TEAM_NAME_HERE]
+**Team Name:** No Cap Analytics
 
 **Guarding Model Integrity in a Shifting Data World**
 
