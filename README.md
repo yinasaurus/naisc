@@ -46,21 +46,48 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### Step 2: Run the Solution
+#### Step 2: Run the solution
+
+Run from the **project root** (the folder that contains `src/` and `requirements.txt`).
+
+**Windows (PowerShell or Command Prompt):**
+
+```powershell
+cd path\to\naisc
+python .\src\main.py --train_data_filepath .\NAISC-Singtel-2026\public_data\train.csv --test_data_filepath .\NAISC-Singtel-2026\public_data\test.csv
+```
+
+If your files are named `train.csv` and `test.csv` in the project root:
+
+```powershell
+python .\src\main.py --train_data_filepath train.csv --test_data_filepath test.csv
+```
+
+**macOS / Linux:**
 
 ```bash
-# Basic usage with public datasets
+cd /path/to/naisc
 python ./src/main.py \
   --train_data_filepath NAISC-Singtel-2026/public_data/train.csv \
   --test_data_filepath NAISC-Singtel-2026/public_data/test.csv
 ```
 
-#### Step 3: Check Outputs
+Replace the paths with your real CSV locations. The script accepts **absolute** or **relative** paths.
 
-After running, you'll get:
-- **Console output**: Drift detection summary, runtime, and AU-PRC metrics
-- **prediction.csv**: Test predictions with CustomerID and probability_score
-- **model.joblib**: Trained LightGBM model
+#### Step 3: Check outputs
+
+**On the console** you will see the drift summary, an ASCII **Columns with Drift** table (challenge format), ablation summary, runtime, and AU-PRC.
+
+**Files written to the current working directory** (usually the project root):
+
+| File | What it is |
+|------|------------|
+| `drift_mitigation_table.csv` | Four-column drift table (same content as the printed challenge table) |
+| `drift_mitigation_table.txt` | Same table as plain-text ASCII |
+| `drift_table.csv` | Full drift metrics per feature (p-values, PSI, flags, etc.) |
+| `ablation_results.csv` | Validation AU-PRC for each mitigation variant |
+| `prediction.csv` | Test predictions: `CustomerID`, `probability_score` |
+| `model.joblib` | Trained LightGBM model |
 
 ---
 

@@ -1,42 +1,37 @@
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
 | Columns with Drift       | Column Type  | Drift Description                                            | Drift Mitigation         |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Contract                 | Object       | Categorical distribution shift (Chi2 p=0, PSI=25.956);       | Category Monitoring      |
-|                          |              | severity=high                                                |                          |
+| Contract                 | Object       | Feature has new set of categorical features in test set      | Drop Feature             |
+|                          |              | compared to training set.                                    |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| TransactionMode          | Object       | Categorical distribution shift (Chi2 p=0, PSI=2.723);        | Category Monitoring      |
-|                          |              | severity=high                                                |                          |
+| TransactionMode          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| DigitalInvoicing         | Object       | Categorical distribution shift (Chi2 p=0, PSI=2.203);        | Category Monitoring      |
-|                          |              | severity=high                                                |                          |
+| DigitalInvoicing         | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| LocationCity             | Object       | Categorical distribution shift (Chi2 p=2.05e-35, PSI=0.468); | Category Monitoring      |
-|                          |              | severity=high                                                |                          |
+| LocationCity             | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| AvgMonthlyLongDistanceCh | Float        | Numeric distribution shift (KS p=0, PSI=0.278);              | Drop Feature             |
-| arges                    |              | severity=high                                                |                          |
+| AvgMonthlyLongDistanceCh | Float        | Feature ranges explode in test set.                          | Feature Scaling          |
+| arges                    |              |                                                              |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| NumberofReferrals        | Int          | Numeric distribution shift (KS p=0, PSI=0.172);              | Feature Scaling          |
-|                          |              | severity=medium                                              |                          |
+| NumberofReferrals        | Int          | Numeric distribution differs between training and test sets. | Feature Scaling          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| ReferredaFriend          | Object       | Categorical distribution shift (Chi2 p=1.58e-270,            | Category Monitoring      |
-|                          |              | PSI=0.105); severity=medium                                  |                          |
+| ReferredaFriend          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| MonthlyCharge            | Float        | Numeric distribution shift (KS p=3.47e-112, PSI=0.095);      | Feature Scaling          |
-|                          |              | severity=low                                                 |                          |
+| MonthlyCharge            | Float        | Feature ranges explode in test set.                          | Feature Scaling          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| PrioritySupport          | Object       | Categorical distribution shift (Chi2 p=4.47e-241,            | Category Monitoring      |
-|                          |              | PSI=0.086); severity=low                                     |                          |
+| PrioritySupport          | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| TotalLongDistanceCharges | Float        | Numeric distribution shift (KS p=5.53e-62, PSI=0.050);       | Feature Scaling          |
-|                          |              | severity=low                                                 |                          |
+| TotalLongDistanceCharges | Float        | Feature ranges explode in test set.                          | Feature Scaling          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| TotalCharges             | Float        | Numeric distribution shift (KS p=5.31e-06, PSI=0.006);       | Feature Scaling          |
-|                          |              | severity=low                                                 |                          |
+| TotalCharges             | Float        | Feature ranges explode in test set.                          | Feature Scaling          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| Longitude                | Float        | Numeric distribution shift (KS p=0.0114, PSI=0.001);         | Feature Scaling          |
-|                          |              | severity=low                                                 |                          |
+| Longitude                | Float        | Feature ranges explode in test set.                          | Feature Scaling          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+
-| UserGender               | Object       | Categorical distribution shift (Chi2 p=0.0217, PSI=0.000);   | Category Monitoring      |
-|                          |              | severity=low                                                 |                          |
+| UserGender               | Object       | Categorical distribution differs between training and test   | Category Monitoring      |
+|                          |              | sets.                                                        |                          |
 +--------------------------+--------------+--------------------------------------------------------------+--------------------------+

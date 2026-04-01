@@ -139,23 +139,72 @@ def _friendly_dtype_name(dtype_name: str) -> str:
     return "Object"
 
 
-def _drift_description(row: pd.Series) -> str:
+def _row_flag(row: pd.Series, key: str) -> bool:
+    v = row[key] if key in row.index else None
+    if v is None or pd.isna(v):
+        return False
+    return bool(v)
+
+
+# Challenge rubric: short, fixed phrasing like the required-outputs slide (not KS/PSI prose).
+TEXT_NEW_LEVELS = (
+    "Feature has new set of categorical features in test set compared to training set."
+)
+TEXT_LEFT_SKEW = (
+    "Feature demonstrates greater left-skewness in test set compared to training set."
+)
+TEXT_RANGE_EXPLODE = "Feature ranges explode in test set."
+
+
+def _challenge_drift_description(row: pd.Series, raw_dtype_map: Dict[str, str]) -> str:
+    feat = str(row["feature"])
+    ctype = _friendly_dtype_name(raw_dtype_map.get(feat, "object"))
+
+    if row["feature_type"] == "categorical" and _row_flag(row, "unseen_categories"):
+        return TEXT_NEW_LEVELS
+    if (
+        row["feature_type"] == "numerical"
+        and ctype == "Int"
+        and _row_flag(row, "skew_left_stronger_in_test")
+    ):
+        return TEXT_LEFT_SKEW
+    if row["feature_type"] == "numerical" and ctype == "Float":
+        return TEXT_RANGE_EXPLODE
+
+    if row["feature_type"] == "categorical":
+        return "Categorical distribution differs between training and test sets."
     if row["feature_type"] == "numerical":
-        return (
-            f"Numeric distribution shift (KS p={row['p_value']:.3g}, PSI={row['psi']:.3f}); "
-            f"severity={row['severity']}"
-        )
-    return (
-        f"Categorical distribution shift (Chi2 p={row['p_value']:.3g}, PSI={row['psi']:.3f}); "
-        f"severity={row['severity']}"
-    )
+        return "Numeric distribution differs between training and test sets."
+    return "Distribution differs between training and test sets."
+
+
+def _challenge_drift_mitigation(
+    row: pd.Series, mitigation_map: Dict[str, str], raw_dtype_map: Dict[str, str]
+) -> str:
+    feat = str(row["feature"])
+    ctype = _friendly_dtype_name(raw_dtype_map.get(feat, "object"))
+
+    if row["feature_type"] == "categorical" and _row_flag(row, "unseen_categories"):
+        return "Drop Feature"
+    if (
+        row["feature_type"] == "numerical"
+        and ctype == "Int"
+        and _row_flag(row, "skew_left_stronger_in_test")
+    ):
+        return "Seasonality Matching"
+    if row["feature_type"] == "numerical" and ctype == "Float":
+        return "Feature Scaling"
+
+    return _friendly_mitigation_name(mitigation_map.get(feat, "none"))
 
 
 def _friendly_mitigation_name(value: str) -> str:
     mapping = {
         "log/robust_scaling": "Feature Scaling",
         "pruned_high_drift_low_importance": "Drop Feature",
+        "drop_unseen_categories": "Drop Feature",
         "categorical_monitoring": "Category Monitoring",
+        "seasonality_matching": "Seasonality Matching",
         "none": "None",
     }
     return mapping.get(value, value.replace("_", " ").title())
@@ -208,9 +257,11 @@ def build_challenge_drift_table(
     only_drift["Column Type"] = only_drift["feature"].map(
         lambda c: _friendly_dtype_name(raw_dtype_map.get(c, "object"))
     )
-    only_drift["Drift Description"] = only_drift.apply(_drift_description, axis=1)
-    only_drift["Drift Mitigation"] = only_drift["feature"].map(
-        lambda c: _friendly_mitigation_name(mitigation_map.get(c, "none"))
+    only_drift["Drift Description"] = only_drift.apply(
+        lambda r: _challenge_drift_description(r, raw_dtype_map), axis=1
+    )
+    only_drift["Drift Mitigation"] = only_drift.apply(
+        lambda r: _challenge_drift_mitigation(r, mitigation_map, raw_dtype_map), axis=1
     )
     out = only_drift[
         ["Columns with Drift", "Column Type", "Drift Description", "Drift Mitigation"]
@@ -252,6 +303,8 @@ def evaluate_variant(
     use_seasonality: bool,
     use_pruning: bool,
 ) -> Tuple[float, pd.DataFrame, pd.DataFrame, Dict[str, str], List[str]]:
+    train_month = train_df["Month"] if "Month" in train_df.columns else None
+    test_month = test_df["Month"] if "Month" in test_df.columns else None
     mitigator = DriftMitigator()
     x_train_v, x_test_v, mitigation_map_v, dropped_v = mitigator.apply(
         x_train,
@@ -262,6 +315,8 @@ def evaluate_variant(
         apply_delta_features=use_delta,
         apply_seasonality=use_seasonality,
         apply_pruning=use_pruning,
+        train_month=train_month,
+        test_month=test_month,
     )
     model_v = train_lightgbm(x_train_v.loc[x_tr.index], y_tr)
     val_proba_v = model_v.predict_proba(x_train_v.loc[x_val.index])[:, 1]
@@ -422,9 +477,16 @@ def main():
     perf_df = pd.DataFrame(perf_rows)
     print_table(perf_df)
 
+    out_dir = Path(".").resolve()
     ablation_df.to_csv("ablation_results.csv", index=False)
     drift_table.to_csv("drift_table.csv", index=False)
     challenge_drift_df.to_csv("drift_mitigation_table.csv", index=False)
+    print("\n" + "=" * 60)
+    print("DRIFT OUTPUT FILES (challenge-format table)")
+    print("=" * 60)
+    print(f"  {out_dir / 'drift_mitigation_table.csv'}")
+    print(f"  {out_dir / 'drift_mitigation_table.txt'}  (same table, ASCII)")
+    print(f"  {out_dir / 'drift_table.csv'}  (full metrics: p-value, PSI, flags, etc.)")
     Path("drift_mitigation_table.txt").write_text(
         _ascii_table(
             challenge_drift_df,
